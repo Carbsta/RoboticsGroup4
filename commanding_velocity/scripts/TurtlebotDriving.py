@@ -19,11 +19,11 @@ class Pose:
 
 class Visualisation:
     """Placeholder Visualisation Class"""
-    def __init__(self):
+    """def __init__(self,x,y):
         self.fig, self.ax = plt.subplots()
         self.xdata, self.ydata = [], []
         self.ln, = plt.plot([],[], 'ro')
-        self.ani = FuncAnimation(self.fig, self.update, frames=np.linspace(0, 2*np.pi, 128),
+        self.ani = FuncAnimation(self.fig, self.update, frames=np.linspace(0, self.robotPos, 128),
                     init_func=self.init, blit=True)
         plt.show()
 
@@ -36,8 +36,9 @@ class Visualisation:
         self.xdata.append(frame)
         self.ydata.append(np.sin(frame))
         self.ln.set_data(self.xdata, self.ydata)
-        return self.ln,
-
+        return self.ln,"""
+    #def __init__(self,x,y):
+        #plt.plot([x],[y])
 
 class TurtlebotDriving:
     """Robot Class
@@ -56,7 +57,8 @@ class TurtlebotDriving:
         self.tolerance = -0.05 # tolerated error when turning
         self.turnThetas = [(pi/2)+self.tolerance, pi+self.tolerance,
                          (pi+(pi/2))+self.tolerance, (2*pi)+self.tolerance]
-
+        self.robotPositionX = []
+        self.robotPositionY = []
 
     def open_loop(self):
         while not rospy.is_shutdown():
@@ -119,6 +121,8 @@ class TurtlebotDriving:
                     self.distance += x+y
                     print 'I have moved {} m'.format(self.distance)
                     print 'I am at {} {}'.format(self.pose.x, self.pose.y)
+                    self.robotPositionX.append(self.pose.x)
+                    self.robotPositionY.append(self.pose.y)
 
 
                 # rotate by angle alpha
@@ -131,6 +135,10 @@ class TurtlebotDriving:
             
             #stop
             self.pub.publish(Twist())
+            #plot = Visualisation(self.robotPositionX,self.robotPositionY)
+            plt.plot(self.robotPositionX,self.robotPositionY)
+            #print 'x {}'.format(self.robotPositionX)
+            plt.show()
             break
 
     def odom_callback(self, msg):
@@ -150,7 +158,7 @@ if __name__ == '__main__':
     try:
         robot = TurtlebotDriving()
         robot.closed_loop()
-        plot = Visualisation()
+        #plot = Visualisation()
     except rospy.ROSInterruptException:
         pass
         
