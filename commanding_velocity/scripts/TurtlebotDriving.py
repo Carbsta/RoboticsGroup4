@@ -133,7 +133,7 @@ class TurtlebotDriving:
         quarternion = [msg.pose.pose.orientation.x,msg.pose.pose.orientation.y,\
                     msg.pose.pose.orientation.z, msg.pose.pose.orientation.w]
         (roll, pitch, yaw) = tf.transformations.euler_from_quaternion(quarternion)
-
+        # Make the range from 0 to +2pi to avoid negative value issues
         if yaw < 0:
             yaw += 2*pi
         self.pose.theta = yaw
