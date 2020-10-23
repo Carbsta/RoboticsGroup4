@@ -5,8 +5,6 @@ from nav_msgs.msg import Odometry
 import tf
 from math import pi
 import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
-import numpy as np
 
 class Pose:
     """Simple Pose Object
@@ -37,13 +35,13 @@ class TurtlebotDriving:
     Subscribes to /odom with the method odom_callback"""
     def __init__(self):
         rospy.init_node('turtlebot_driving', anonymous=True)
-        self.rate = rospy.Rate(20)
+        self.rate = rospy.Rate(30)
         self.pose = Pose(0,0,0)
         self.distance = 0
         self.rotation = 0
         self.pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
         self.sub = rospy.Subscriber('odom',Odometry,self.odom_callback)
-        self.tolerance = -0.01 # tolerated error when turning
+        self.tolerance = -0.01 # tolerated error when turning to avoid missing turns
         self.turnThetas = [(pi/2)+self.tolerance, pi+self.tolerance,
                          (pi+(pi/2))+self.tolerance, (2*pi)+self.tolerance]
         self.robotPositionX = []
@@ -52,16 +50,18 @@ class TurtlebotDriving:
     def open_loop(self):
         while not rospy.is_shutdown():
 
+            self.rate.sleep()
+
             for _ in range(0,4):
                 # drive move a distance d
                 move_cmd = Twist()
-                move_cmd.linear.x = 0.15
+                move_cmd.linear.x = 0.1
                 self.distance = 0
 
-                time = rospy.Time.now()
+                time = rospy.Time.now().to_sec()
                 oldpose_x = self.pose.x
                 oldpose_y = self.pose.y
-                while rospy.Time.now() - time < rospy.Duration(10):
+                while rospy.Time.now().to_sec() - time < rospy.Duration(10).to_sec():
                     self.pub.publish( move_cmd )
                     self.rate.sleep()
                     x = abs(self.pose.x - oldpose_x)
@@ -69,26 +69,24 @@ class TurtlebotDriving:
                     oldpose_x = self.pose.x
                     oldpose_y = self.pose.y
                     self.distance += x+y
-                    print 'I have moved {} m'.format(self.distance)
-                    print 'I am at {} {}'.format(self.pose.x, self.pose.y)
                     self.robotPositionX.append(self.pose.x)
                     self.robotPositionY.append(self.pose.y)
+                print 'I have moved {} m'.format(self.distance)
+                print 'I am at {} {}'.format(self.pose.x, self.pose.y)
 
                 # rotate by angle alpha
                 move_cmd.linear.x = 0.0
                 # rotate 90 degrees over two seconds
                 move_cmd.angular.z = (pi/2)/2
-                time = rospy.Time.now()
-                while rospy.Time.now() - time < rospy.Duration(2):
+                time = rospy.Time.now().to_sec()
+                while rospy.Time.now().to_sec() - time < rospy.Duration(2).to_sec():
                     self.pub.publish(move_cmd)
                     self.rate.sleep()
-                    print 'My orientation is {}'.format(self.pose.theta)
+                print 'My orientation is {}'.format(self.pose.theta)
 
             # stop
             self.pub.publish(Twist())
-            # visualise
-            visualisation = Visualisation(self.robotPositionX, self.robotPositionY)
-            visualisation.visualise()
+            self.plot_trajectory()
             break
 
     def closed_loop(self):
@@ -111,10 +109,10 @@ class TurtlebotDriving:
                     oldpose_x = self.pose.x
                     oldpose_y = self.pose.y
                     self.distance += x+y
-                    print 'I have moved {} m'.format(self.distance)
-                    print 'I am at {} {}'.format(self.pose.x, self.pose.y)
                     self.robotPositionX.append(self.pose.x)
                     self.robotPositionY.append(self.pose.y)
+                print 'I have moved {} m'.format(self.distance)
+                print 'I am at {} {}'.format(self.pose.x, self.pose.y)
 
                 # rotate by angle alpha
                 move_cmd.linear.x = 0.0
@@ -122,13 +120,12 @@ class TurtlebotDriving:
                 while self.pose.theta < self.turnThetas[i]:
                     self.pub.publish(move_cmd)
                     self.rate.sleep()
-                    print 'My orientation is {}'.format(self.pose.theta)
+                print 'My orientation is {}'.format(self.pose.theta)
             
             #stop
             self.pub.publish(Twist())
             # visualise
-            visualisation = Visualisation(self.robotPositionX, self.robotPositionY)
-            visualisation.visualise()
+            self.plot_trajectory()
             break
 
     def odom_callback(self, msg):
@@ -143,6 +140,9 @@ class TurtlebotDriving:
         self.pose.x = msg.pose.pose.position.x
         self.pose.y = msg.pose.pose.position.y
 
+    def plot_trajectory(self):
+        visualisation = Visualisation(self.robotPositionX, self.robotPositionY)
+        visualisation.visualise()
 
 if __name__ == '__main__':
     try:
