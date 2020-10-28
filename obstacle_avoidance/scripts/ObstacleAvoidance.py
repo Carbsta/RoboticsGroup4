@@ -4,7 +4,7 @@ from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
 import tf
-from math import pi
+from math import pi, sqrt
 
 class Pose:
     """Simple Pose Object
@@ -23,8 +23,9 @@ class TurtlebotDriving:
     Subscribes to /odom with the method odom_callback"""
     def __init__(self):
         rospy.init_node('turtlebot_driving', anonymous=True)
-        self.rate = rospy.Rate(30)
+        self.rate = rospy.Rate(10)
         self.pose = Pose(0,0,0)
+        self.distance = 0
         self.pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
         self.sub = rospy.Subscriber('odom',Odometry,self.odom_callback)
 
@@ -42,16 +43,37 @@ class TurtlebotDriving:
 
     def robot_movement(self):
         while not rospy.is_shutdown:
-            self.rate.sleep()
+
+            random_walk()
 
     def random_walk(self):
-        break
+        while not rospy.is_shutdown():
+        
+            move_cmd = Twist()
+            move_cmd.linear.x = 0.15
+
+            self.distance = 0
+
+            x1 = self.pose.x
+            y1 = self.pose.y
+            while self.distance < 3:
+                self.pub.publish(move_cmd)
+                self.rate.sleep()
+                x2 = self.pose.x
+                y2 = self.pose.y
+                self.distance += abs(x2 - x1) + abs(y2 - y1)
+                x1 = self.pose.x
+                y1 = self.pose.y
+            
+            
+            
+
 
     def obstacle_avoidance(self):
-        break
+        return
 
     def wall_following(self):
-        break
+        return
 
     
 
