@@ -23,10 +23,12 @@ class TurtlebotDriving:
     Subscribes to /odom with the method odom_callback"""
     def __init__(self):
         rospy.init_node('turtlebot_driving', anonymous=True)
-        self.rate = rospy.Rate(30)
+        self.rate = rospy.Rate(10)
         self.pose = Pose(0,0,0)
+        self.ranges = [0] * 360
         self.pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
-        self.sub = rospy.Subscriber('odom',Odometry,self.odom_callback)
+        self.sub = rospy.Subscriber('odom', Odometry,self.odom_callback)
+        self.sub = rospy.Subscriber('/scan', LaserScan,self.scan_callback)
 
     def odom_callback(self, msg):
         # Get (x, y, theta) specification from odometry topic
@@ -39,25 +41,60 @@ class TurtlebotDriving:
         self.pose.theta = yaw
         self.pose.x = msg.pose.pose.position.x
         self.pose.y = msg.pose.pose.position.y
+    
+    def scan_callback(self, msg):
+        print 'test'
+        self.ranges = msg.ranges
+        dis_left = self.ranges[90]
 
     def robot_movement(self):
-        while not rospy.is_shutdown:
+        while not rospy.is_shutdown():
             self.rate.sleep()
+            self.random_walk()
 
     def random_walk(self):
-        break
+        # drive move a distance d
+        move_cmd = Twist()
+        move_cmd.linear.x = 0.1
+        self.distance = 0
+
+        time = rospy.Time.now().to_sec()
+        oldpose_x = self.pose.x
+        oldpose_y = self.pose.y
+        while rospy.Time.now().to_sec() - time < rospy.Duration(2).to_sec():
+            self.pub.publish(move_cmd)
+            self.rate.sleep()
+            x = abs(self.pose.x - oldpose_x)
+            y = abs(self.pose.y - oldpose_y)
+            oldpose_x = self.pose.x
+            oldpose_y = self.pose.y
+            self.distance += x+y
+            self.obstacle_avoidance()
+        print 'I have moved {} m'.format(self.distance)
+        print 'I am at {} {}'.format(self.pose.x, self.pose.y)
 
     def obstacle_avoidance(self):
-        break
+        print 'avoiding'
+        if self.ranges[0] <= 0.25 or self.ranges[270]<= 0.25 or self.ranges[90]<= 0.25:
+            # stop forward movement
+            move_cmd = Twist()
+            move_cmd.linear.x = 0.0
+            self.pub.publish(move_cmd)
+            while self.ranges[0] > 1.0:
+                # while there is nothing in front 1 meter rotate
+                move_cmd.angular.z = pi/8
+                self.pub.publish(move_cmd)
+
+        print 'Range {} '.format(self.ranges[0])
 
     def wall_following(self):
-        break
+        print 'following'
 
     
 
 if __name__ == '__main__':
     try:
         robot = TurtlebotDriving()
-        robot.random_walk()
+        robot.robot_movement()
     except rospy.ROSInterruptException:
         pass
