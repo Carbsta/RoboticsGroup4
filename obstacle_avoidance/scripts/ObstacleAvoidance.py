@@ -18,14 +18,18 @@ class Pose:
 class TurtlebotDriving:
     """Robot Class
     
-    Contains methods for both open loop and closed loop control.
+    Contains methods for both RANDOM WALK and OBSTACLE AVOIDANCE.
     Publishes to /cmd_vel
-    Subscribes to /odom with the method odom_callback"""
+    Subscribes to /odom with the method odom_callback
+    Subscribes to /scan with the method scan_callback"""
     def __init__(self):
         rospy.init_node('turtlebot_driving', anonymous=True)
         self.rate = rospy.Rate(10)
         self.pose = Pose(0,0,0)
         self.ranges = [0] * 360
+        self.front_average = 1
+        self.left_average = 1
+        self.right_average = 1
         self.pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
         self.sub = rospy.Subscriber('odom', Odometry,self.odom_callback)
         self.sub = rospy.Subscriber('/scan', LaserScan,self.scan_callback)
@@ -43,9 +47,14 @@ class TurtlebotDriving:
         self.pose.y = msg.pose.pose.position.y
     
     def scan_callback(self, msg):
-        print 'test'
         self.ranges = msg.ranges
-        dis_left = self.ranges[90]
+        self.front_list = self.ranges[0:15] + self.ranges[345:360]
+        self.front_average = sum(self.front_list) / len(self.front_list)
+        self.left_list = self.ranges[75:105]
+        self.left_average = sum(self.left_list) / len(self.left_list)
+        self.right_list = self.ranges[255:285]
+        self.right_average = sum(self.right_list) / len(self.right_list)
+        print 'fr {} left {} right {}'.format(self.front_average, self.left_average, self.right_average)
 
     def robot_movement(self):
         while not rospy.is_shutdown():
@@ -74,24 +83,21 @@ class TurtlebotDriving:
         print 'I am at {} {}'.format(self.pose.x, self.pose.y)
 
     def obstacle_avoidance(self):
-        print 'avoiding'
-        if self.ranges[0] <= 0.25 or self.ranges[270]<= 0.25 or self.ranges[90]<= 0.25:
+        if self.front_average <= 0.25 or self.left_average <= 0.25 or self.right_average <= 0.25:
+            print 'avoiding'
             # stop forward movement
             move_cmd = Twist()
             move_cmd.linear.x = 0.0
             self.pub.publish(move_cmd)
-            while self.ranges[0] > 1.0:
-                # while there is nothing in front 1 meter rotate
-                move_cmd.angular.z = pi/8
+            while self.front_average < 1.0:
+                # while there is nothing in frontrotate
+                move_cmd.angular.z = -pi/8
                 self.pub.publish(move_cmd)
-
-        print 'Range {} '.format(self.ranges[0])
 
     def wall_following(self):
         print 'following'
 
     
-
 if __name__ == '__main__':
     try:
         robot = TurtlebotDriving()
