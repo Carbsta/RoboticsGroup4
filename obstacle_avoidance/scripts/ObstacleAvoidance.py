@@ -47,7 +47,9 @@ class TurtlebotDriving:
         self.pose.y = msg.pose.pose.position.y
     
     def scan_callback(self, msg):
+        # Get the ranges from the scan msg
         self.ranges = msg.ranges
+        # Get a 30 degree cone reading from front left and right
         self.front_list = self.ranges[0:15] + self.ranges[345:360]
         self.front_average = sum(self.front_list) / len(self.front_list)
         self.left_list = self.ranges[75:105]
@@ -62,7 +64,7 @@ class TurtlebotDriving:
             self.random_walk()
 
     def random_walk(self):
-        # drive move a distance d
+        # Drive move a distance d
         move_cmd = Twist()
         move_cmd.linear.x = 0.1
         self.distance = 0
@@ -84,13 +86,13 @@ class TurtlebotDriving:
 
     def obstacle_avoidance(self):
         if self.front_average <= 0.25 or self.left_average <= 0.25 or self.right_average <= 0.25:
-            print 'avoiding'
-            # stop forward movement
+            print 'Avoiding'
+            # Stop forward movement
             move_cmd = Twist()
             move_cmd.linear.x = 0.0
             self.pub.publish(move_cmd)
+            # While there is nothing in front 1m rotate
             while self.front_average < 1.0:
-                # while there is nothing in frontrotate
                 move_cmd.angular.z = -pi/8
                 self.pub.publish(move_cmd)
 
