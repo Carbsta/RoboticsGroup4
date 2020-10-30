@@ -5,6 +5,7 @@ from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
 import tf
 from math import pi
+import random
 
 class Pose:
     """Simple Pose Object
@@ -18,21 +19,19 @@ class Pose:
 class TurtlebotDriving:
     """Robot Class
     
-    Contains methods for both RANDOM WALK and OBSTACLE AVOIDANCE.
+    Contains methods for both open loop and closed loop control.
     Publishes to /cmd_vel
-    Subscribes to /odom with the method odom_callback
-    Subscribes to /scan with the method scan_callback"""
+    Subscribes to /odom with the method odom_callback"""
     def __init__(self):
         rospy.init_node('turtlebot_driving', anonymous=True)
-        self.rate = rospy.Rate(10)
+        self.rate = rospy.Rate(30)
         self.pose = Pose(0,0,0)
-        self.ranges = [0] * 360
-        self.front_average = 1
-        self.left_average = 1
-        self.right_average = 1
         self.pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
-        self.sub = rospy.Subscriber('odom', Odometry,self.odom_callback)
-        self.sub = rospy.Subscriber('/scan', LaserScan,self.scan_callback)
+        self.sub = rospy.Subscriber('odom',Odometry,self.odom_callback)
+        self.scan_sub = rospy.Subscriber('scan', LaserScan, self.scan_callback)
+        self.random_walking = True
+        self.rotate_direction = 0
+        self.obstacle_interval = 0.5
 
     def odom_callback(self, msg):
         # Get (x, y, theta) specification from odometry topic
@@ -45,61 +44,57 @@ class TurtlebotDriving:
         self.pose.theta = yaw
         self.pose.x = msg.pose.pose.position.x
         self.pose.y = msg.pose.pose.position.y
-    
+
     def scan_callback(self, msg):
-        # Get the ranges from the scan msg
-        self.ranges = msg.ranges
-        # Get a 30 degree cone reading from front left and right
-        self.front_list = self.ranges[0:15] + self.ranges[345:360]
-        self.front_average = sum(self.front_list) / len(self.front_list)
-        self.left_list = self.ranges[75:105]
-        self.left_average = sum(self.left_list) / len(self.left_list)
-        self.right_list = self.ranges[255:285]
-        self.right_average = sum(self.right_list) / len(self.right_list)
-        print 'fr {} left {} right {}'.format(self.front_average, self.left_average, self.right_average)
+        front_list = msg.ranges[0:14] + msg.ranges[345:359]
+        front_average = sum(front_list) / len(front_list)
+        left_list = msg.ranges[15:44]
+        left_average = sum(left_list) / len(left_list)
+        right_list = msg.ranges[315:344]
+        right_average = sum(right_list) / len(right_list)
+        print('front {}, right {}, left {}'.format(front_average, right_average, left_average))
+        if front_average < self.obstacle_interval or left_average < self.obstacle_interval or right_average < self.obstacle_interval:
+            if self.random_walking:
+                self.random_walking = False
+                if left_average < self.obstacle_interval:
+                    self.rotate_direction = 1
+                elif right_average < self.obstacle_interval:
+                    self.rotate_direction = 0
+                else:
+                    self.rotate_direction = random.uniform(0, 1)
+                print('stop here')
+        else:
+            self.random_walking = True
 
     def robot_movement(self):
         while not rospy.is_shutdown():
-            self.rate.sleep()
-            self.random_walk()
+            if self.random_walking:
+                self.random_walk()
+            else:
+                self.obstacle_avoidance()
 
     def random_walk(self):
-        # Drive move a distance d
+        print('random walking')
         move_cmd = Twist()
-        move_cmd.linear.x = 0.1
-        self.distance = 0
-
-        time = rospy.Time.now().to_sec()
-        oldpose_x = self.pose.x
-        oldpose_y = self.pose.y
-        while rospy.Time.now().to_sec() - time < rospy.Duration(2).to_sec():
+        speed = 0.15
+        move_cmd.linear.x = speed
+        t = rospy.Time.now().to_sec()
+        while rospy.Time.now().to_sec() - t < rospy.Duration(1).to_sec():
             self.pub.publish(move_cmd)
             self.rate.sleep()
-            x = abs(self.pose.x - oldpose_x)
-            y = abs(self.pose.y - oldpose_y)
-            oldpose_x = self.pose.x
-            oldpose_y = self.pose.y
-            self.distance += x+y
-            self.obstacle_avoidance()
-        print 'I have moved {} m'.format(self.distance)
-        print 'I am at {} {}'.format(self.pose.x, self.pose.y)
 
     def obstacle_avoidance(self):
-        if self.front_average <= 0.25 or self.left_average <= 0.25 or self.right_average <= 0.25:
-            print 'Avoiding'
-            # Stop forward movement
-            move_cmd = Twist()
-            move_cmd.linear.x = 0.0
-            self.pub.publish(move_cmd)
-            # While there is nothing in front 1m rotate
-            while self.front_average < 1.0:
-                move_cmd.angular.z = -pi/8
-                self.pub.publish(move_cmd)
+        print('avoiding')
+        self.pub.publish(Twist())
+        rotate_cmd = Twist()
+        speed = pi/4 if self.rotate_direction == 0 else -pi/4
+        print('rotating to {} with speed {}'.format(self.rotate_direction, speed))
+        rotate_cmd.angular.z = speed
+        t = rospy.Time.now().to_sec()
+        while rospy.Time.now().to_sec() - t < rospy.Duration(1).to_sec():
+            self.pub.publish(rotate_cmd)
+            self.rate.sleep()
 
-    def wall_following(self):
-        print 'following'
-
-    
 if __name__ == '__main__':
     try:
         robot = TurtlebotDriving()
