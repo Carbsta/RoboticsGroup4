@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import rospy
+import random 
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
