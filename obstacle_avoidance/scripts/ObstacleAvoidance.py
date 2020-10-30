@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import rospy
+import random 
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
@@ -64,7 +65,14 @@ class TurtlebotDriving:
                 self.distance += abs(x2 - x1) + abs(y2 - y1)
                 x1 = self.pose.x
                 y1 = self.pose.y
-            
+            # rotate by angle alpha
+            move_cmd.linear.x = 0.0
+            move_cmd.angular.z = pi/32
+            i = pi*random.random()
+            while(self.pose.theta < i):
+                self.pub.publish(move_cmd)
+                self.rate.sleep()
+            print 'My orientation is {}'.format(self.pose.theta)
             
             
 
