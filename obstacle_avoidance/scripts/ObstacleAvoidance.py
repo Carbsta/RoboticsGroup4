@@ -23,7 +23,19 @@ class TurtlebotDriving:
     Contains methods for both RANDOM WALK and OBSTACLE AVOIDANCE.
     Publishes to /cmd_vel
     Subscribes to /odom with the method odom_callback
-    Subscribes to /scan with the method scan_callback"""
+    Subscribes to /scan with the method scan_callback
+    
+    member variables:
+        rate: refresh rate in Hz of actions, used to set intervals of sleep
+        pose: robot pose object
+        ranges: list of 360 degrees of range lasers
+        range_cones: ranges broken down into average values across a small number of cones
+        range_flags: boolean values that are true if the value of a cone is less than obstacle_range
+        distance: distance travelled by the robot in a straight line
+        obstacle_range: parameter to control how close the robot can get to obstacles
+        pub: publisher channel to post movement commands to
+        odom_sub: subscriber channel to recieve odometry data
+        laser_sub: subscriber channel to recieve scan data"""
     def __init__(self):
         rospy.init_node('turtlebot_driving', anonymous=True)
         self.rate = rospy.Rate(10)
@@ -34,10 +46,17 @@ class TurtlebotDriving:
         self.distance = 0
         self.obstacle_range = 0.5
         self.pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
-        self.sub = rospy.Subscriber('odom', Odometry,self.odom_callback)
-        self.sub = rospy.Subscriber('/scan', LaserScan,self.scan_callback)
+        self.odom_sub = rospy.Subscriber('odom', Odometry,self.odom_callback)
+        self.laser_sub = rospy.Subscriber('/scan', LaserScan,self.scan_callback)
 
     def odom_callback(self, msg):
+        """Callback method to update internal pose of the robot.
+
+        returns: 
+            nothing
+        arguments:
+            msg: pose data supplied by the /odom topic
+        """
         # Get (x, y, theta) specification from odometry topic
         quarternion = [msg.pose.pose.orientation.x,msg.pose.pose.orientation.y,\
                     msg.pose.pose.orientation.z, msg.pose.pose.orientation.w]
@@ -50,17 +69,21 @@ class TurtlebotDriving:
         self.pose.y = msg.pose.pose.position.y
     
     def scan_callback(self, msg):
-        # Get the ranges from the scan msg
+        """Callback method to update internal list of range cones and flags
+
+        returns: 
+            nothing
+        arguments:
+            msg: scan data used to populate list of ranges from /scan topic"""
         self.ranges = msg.ranges
-        # map(lambda x : 3 if x>3 else x, self.ranges)
-        # Get a 30 degree cone reading from front left and right
-        front_centre_left = self.ranges[0:14]
+
+        front_centre_left = self.ranges[0:14] # 15 degree cone
         self.range_cones[0] = sum(front_centre_left) / len(front_centre_left)
 
         front_left = self.ranges[15:29]
         self.range_cones[1] = sum(front_left) / len(front_left)
 
-        front_left_bumper = self.ranges[30:60]
+        front_left_bumper = self.ranges[30:60] # 30 degree cone
         self.range_cones[2] = sum(front_left_bumper) / len(front_left_bumper)
 
         front_right_bumper = self.ranges[300:330]
@@ -74,14 +97,30 @@ class TurtlebotDriving:
 
         self.range_flags = [x <= self.obstacle_range for x in self.range_cones]
         
-
-
     def robot_movement(self):
+        """Robot Movement Control
+        
+        Entry function from main, calls random_walk() continuously
+        Can be extended to run wall following behaviour
+        
+        returns: 
+            nothing
+        arguments: 
+            none"""
         while not rospy.is_shutdown():
             self.rate.sleep()
             self.random_walk()
 
     def obstacle_avoidance(self):
+        """Obstacle Avoidance
+        
+        Checks if range flags have been set, and picks a direction for the robot to turn.
+        Turns the robot until the relevant range flags are no longer set.
+        
+        returns: 
+            nothing
+        arguments: 
+            none"""
         if self.range_flags[0] or self.range_flags[5] or self.range_flags[1] or self.range_flags[4]:
             print 'AVOIDING FRONT!'
 
@@ -106,7 +145,6 @@ class TurtlebotDriving:
         if self.range_flags[2]:
             print 'AVOIDING FRONT LEFT!'
 
-            # While there is nothing in front 1m rotate
             while self.range_flags[2]:
                 target_theta = (self.pose.theta - pi/16)
                 self.turn_to_theta(target_theta)
@@ -116,23 +154,23 @@ class TurtlebotDriving:
         if self.range_flags[3]:
             print 'AVOIDING FRONT RIGHT!'
 
-            # While there is nothing in front 1m rotate
             while self.range_flags[3]:
                 target_theta = (self.pose.theta + pi/16)
                 self.turn_to_theta(target_theta)
 
             print "Avoiding Complete."
 
-
-            
-
     def wall_following(self):
+        """future wall following"""
         print 'following'
-        while not rospy.is_shutdown:
-
-            self.random_walk()
 
     def random_walk(self):
+        """Moves robot forward for three meters before turning a random direction.
+        
+        returns:
+            nothing
+        arguments:
+            none"""
         while not rospy.is_shutdown():
         
             move_cmd = Twist()
@@ -159,7 +197,8 @@ class TurtlebotDriving:
     def turn_to_theta(self, target_theta):
         """Turns the robot to the desired orientation via the shortest arc.
         
-        returns: nothing
+        returns: 
+            nothing
         arguments:
             target_theta: the desired orientation of the robot in the world coordinates"""
 
