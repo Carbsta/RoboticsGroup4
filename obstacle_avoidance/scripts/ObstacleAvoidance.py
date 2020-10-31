@@ -29,10 +29,10 @@ class TurtlebotDriving:
         self.rate = rospy.Rate(10)
         self.pose = Pose(0,0,0)
         self.ranges = [0] * 360
-        self.front_average = 1
-        self.left_average = 1
-        self.right_average = 1
+        self.range_cones = [0] * 6
+        self.range_flags = [False] * 6
         self.distance = 0
+        self.obstacle_range = 0.5
         self.pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
         self.sub = rospy.Subscriber('odom', Odometry,self.odom_callback)
         self.sub = rospy.Subscriber('/scan', LaserScan,self.scan_callback)
@@ -52,14 +52,29 @@ class TurtlebotDriving:
     def scan_callback(self, msg):
         # Get the ranges from the scan msg
         self.ranges = msg.ranges
+        # map(lambda x : 3 if x>3 else x, self.ranges)
         # Get a 30 degree cone reading from front left and right
-        self.front_list = self.ranges[0:15] + self.ranges[345:360]
-        self.front_average = sum(self.front_list) / len(self.front_list)
-        self.left_list = self.ranges[75:105]
-        self.left_average = sum(self.left_list) / len(self.left_list)
-        self.right_list = self.ranges[255:285]
-        self.right_average = sum(self.right_list) / len(self.right_list)
-        print 'fr {} left {} right {}'.format(self.front_average, self.left_average, self.right_average)
+        front_centre_left = self.ranges[0:14]
+        self.range_cones[0] = sum(front_centre_left) / len(front_centre_left)
+
+        front_left = self.ranges[15:29]
+        self.range_cones[1] = sum(front_left) / len(front_left)
+
+        front_left_bumper = self.ranges[30:60]
+        self.range_cones[2] = sum(front_left_bumper) / len(front_left_bumper)
+
+        front_right_bumper = self.ranges[300:330]
+        self.range_cones[3] = sum(front_right_bumper) / len(front_right_bumper)
+
+        front_right = self.ranges[330:344]
+        self.range_cones[4] = sum(front_right) / len(front_right)
+
+        front_centre_right = self.ranges[345:359]
+        self.range_cones[5] = sum(front_centre_right) / len(front_centre_right)
+
+        self.range_flags = [x <= self.obstacle_range for x in self.range_cones]
+        
+
 
     def robot_movement(self):
         while not rospy.is_shutdown():
@@ -67,16 +82,49 @@ class TurtlebotDriving:
             self.random_walk()
 
     def obstacle_avoidance(self):
-        if self.front_average <= 0.25 or self.left_average <= 0.25 or self.right_average <= 0.25:
-            print 'Avoiding'
-            # Stop forward movement
-            move_cmd = Twist()
-            move_cmd.linear.x = 0.0
-            self.pub.publish(move_cmd)
+        if self.range_flags[0] or self.range_flags[5] or self.range_flags[1] or self.range_flags[4]:
+            print 'AVOIDING FRONT!'
+
+            if self.range_cones[0] < self.range_cones[5]:
+                print 'Turning Right'
+                turnright = True
+                
+            else:
+                print 'Turning Left'
+                turnright = False
+
+            while self.range_flags[0] or self.range_flags[5] or self.range_flags[1] or self.range_flags[4]:
+                if turnright:
+                    target_theta = (self.pose.theta - pi/16)
+                    self.turn_to_theta(target_theta)
+                else:
+                    target_theta = (self.pose.theta + pi/16)
+                    self.turn_to_theta(target_theta)
+
+            print "Avoiding Complete."
+        
+        if self.range_flags[2]:
+            print 'AVOIDING FRONT LEFT!'
+
             # While there is nothing in front 1m rotate
-            while self.front_average < 1.0:
-                move_cmd.angular.z = -pi/8
-                self.pub.publish(move_cmd)
+            while self.range_flags[2]:
+                target_theta = (self.pose.theta - pi/16)
+                self.turn_to_theta(target_theta)
+
+            print "Avoiding Complete."
+        
+        if self.range_flags[3]:
+            print 'AVOIDING FRONT RIGHT!'
+
+            # While there is nothing in front 1m rotate
+            while self.range_flags[3]:
+                target_theta = (self.pose.theta + pi/16)
+                self.turn_to_theta(target_theta)
+
+            print "Avoiding Complete."
+
+
+            
 
     def wall_following(self):
         print 'following'
@@ -95,6 +143,7 @@ class TurtlebotDriving:
             x1 = self.pose.x
             y1 = self.pose.y
             while self.distance < 3:
+                self.obstacle_avoidance()
                 self.pub.publish(move_cmd)
                 self.rate.sleep()
                 x2 = self.pose.x
@@ -102,8 +151,8 @@ class TurtlebotDriving:
                 self.distance += abs(x2 - x1) + abs(y2 - y1)
                 x1 = self.pose.x
                 y1 = self.pose.y
-                self.obstacle_avoidance()
 
+            print "RANDOM TURN!"
             target_theta = uniform(0, 2*pi)
             self.turn_to_theta(target_theta)
 
