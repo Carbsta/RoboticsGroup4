@@ -8,6 +8,7 @@ import tf
 from math import pi, sqrt
 from random import uniform
 import cv_bridge, cv2
+import numpy as np
 
 class Pose:
     """Simple Pose Object
@@ -50,7 +51,7 @@ class TurtlebotDriving:
         self.odom_sub = rospy.Subscriber('odom', Odometry,self.odom_callback)
         self.laser_sub = rospy.Subscriber('/scan', LaserScan,self.scan_callback)
         self.bridge = cv_bridge.CvBridge()
-        cv2.namedWindow("original", 1)
+        # cv2.namedWindow("original", 1)
         self.image_sub = rospy.Subscriber('/camera/rgb/image_raw', Image, self.image_callback)
 
     def odom_callback(self, msg):
@@ -105,7 +106,16 @@ class TurtlebotDriving:
       image = self.bridge.imgmsg_to_cv2(msg,desired_encoding='bgr8')
       (h, w) = image.shape[:2]
       image_resized = cv2.resize(image, (w/4,h/4))
-      cv2.imshow("original", image_resized)
+      hsv_image = cv2.cvtColor(image_resized, cv2.COLOR_BGR2HSV)
+
+      lower_hsv_green = np.array([40, 40, 40], dtype="uint8")
+      upper_hsv_green = np.array([70, 255, 255], dtype="uint8")
+
+      mask = cv2.inRange(hsv_image, lower_hsv_green, upper_hsv_green)
+      masked_image = cv2.bitwise_and(hsv_image, hsv_image, mask=mask)
+
+      #cv2.imshow("original", image_resized)
+      cv2.imshow("masked", masked_image)
       cv2.waitKey(3)
         
     def robot_movement(self):
