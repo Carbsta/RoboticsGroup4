@@ -47,11 +47,11 @@ class TurtlebotDriving:
         self.range_flags = [False] * 6
         self.distance = 0
         self.obstacle_range = 0.5
+        self.bridge = cv_bridge.CvBridge()
+        cv2.namedWindow("original", 1)
         self.pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
         self.odom_sub = rospy.Subscriber('odom', Odometry,self.odom_callback)
         self.laser_sub = rospy.Subscriber('/scan', LaserScan,self.scan_callback)
-        self.bridge = cv_bridge.CvBridge()
-        # cv2.namedWindow("original", 1)
         self.image_sub = rospy.Subscriber('/camera/rgb/image_raw', Image, self.image_callback)
 
     def odom_callback(self, msg):
@@ -103,20 +103,44 @@ class TurtlebotDriving:
         self.range_flags = [x <= self.obstacle_range for x in self.range_cones]
 
     def image_callback(self, msg):
-      image = self.bridge.imgmsg_to_cv2(msg,desired_encoding='bgr8')
-      (h, w) = image.shape[:2]
-      image_resized = cv2.resize(image, (w/4,h/4))
-      hsv_image = cv2.cvtColor(image_resized, cv2.COLOR_BGR2HSV)
+        """ Callback method for the image recognition
+        
+        returns: 
+            nothing
+        arguments:
+            msg: scan data used to populate list of ranges from /camera/rgb/image_raw topic"""
+        image = self.bridge.imgmsg_to_cv2(msg,desired_encoding='bgr8')
+        (h, w) = image.shape[:2]
+        image_resized = cv2.resize(image, (w/4,h/4))
+        hsv_image = cv2.cvtColor(image_resized, cv2.COLOR_BGR2HSV)
 
-      lower_hsv_green = np.array([40, 40, 40], dtype="uint8")
-      upper_hsv_green = np.array([70, 255, 255], dtype="uint8")
+        lower_hsv_green = np.array([40, 40, 40], dtype="uint8")
+        upper_hsv_green = np.array([70, 255, 255], dtype="uint8")
 
-      mask = cv2.inRange(hsv_image, lower_hsv_green, upper_hsv_green)
-      masked_image = cv2.bitwise_and(hsv_image, hsv_image, mask=mask)
+        mask = cv2.inRange(hsv_image, lower_hsv_green, upper_hsv_green)
+        masked_image = cv2.bitwise_and(hsv_image, hsv_image, mask=mask)
 
-      #cv2.imshow("original", image_resized)
-      cv2.imshow("masked", masked_image)
-      cv2.waitKey(3)
+        gray_image = cv2.cvtColor(masked_image, cv2.COLOR_BGR2GRAY)
+
+        ret,thresh = cv2.threshold(gray_image,127,255,0)
+
+        M = cv2.moments(thresh)
+
+        print(M)
+        # condition never true , if removed divide by 0 error
+        if M['m00'] > 0:
+            cX = int(M["m10"] / M["m00"])
+            cY = int(M["m01"] / M["m00"])
+            err = cX- w/2
+            move_cmd = Twist()
+            move_cmd.linear.x = 0.2
+            move_cmd.angular.z = -float(err) / 100
+            self.pub.publish(move_cmd)
+
+        cv2.imshow("original", image_resized)
+        cv2.imshow("masked", masked_image)
+        cv2.imshow("gray_masked", gray_image)
+        cv2.waitKey(3)
         
     def robot_movement(self):
         """Robot Movement Control
@@ -130,6 +154,7 @@ class TurtlebotDriving:
             none"""
         while not rospy.is_shutdown():
             self.rate.sleep()
+            #self.proportional_control()
             self.random_walk()
 
     def obstacle_avoidance(self):
