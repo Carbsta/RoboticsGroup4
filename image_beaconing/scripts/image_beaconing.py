@@ -47,6 +47,9 @@ class TurtlebotDriving:
         self.range_flags = [False] * 6
         self.distance = 0
         self.obstacle_range = 0.5
+        self.err = 0
+        self.proportional_z = 0
+        self.pillar_found = False
         self.bridge = cv_bridge.CvBridge()
         cv2.namedWindow("original", 1)
         self.pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
@@ -118,28 +121,25 @@ class TurtlebotDriving:
         upper_hsv_green = np.array([70, 255, 255], dtype="uint8")
 
         mask = cv2.inRange(hsv_image, lower_hsv_green, upper_hsv_green)
-        masked_image = cv2.bitwise_and(hsv_image, hsv_image, mask=mask)
 
-        gray_image = cv2.cvtColor(masked_image, cv2.COLOR_BGR2GRAY)
+        M = cv2.moments(mask)
 
-        ret,thresh = cv2.threshold(gray_image,127,255,0)
-
-        M = cv2.moments(thresh)
-
-        print(M)
+        # print(M)
         # condition never true , if removed divide by 0 error
         if M['m00'] > 0:
             cX = int(M["m10"] / M["m00"])
             cY = int(M["m01"] / M["m00"])
-            err = cX- w/2
-            move_cmd = Twist()
-            move_cmd.linear.x = 0.2
-            move_cmd.angular.z = -float(err) / 100
-            self.pub.publish(move_cmd)
+            cv2.circle(image_resized,(cX,cY), 5, (0,0,255), -1)
+            self.pillar_found = True
+            self.proportional_z = -float(self.err) / 100
+            self.err = cX- w/8
+        else:
+            self.pillar_found = False
+            self.proportional_z = 0
 
-        cv2.imshow("original", image_resized)
-        cv2.imshow("masked", masked_image)
-        cv2.imshow("gray_masked", gray_image)
+        cv2.imshow("window", image_resized)
+        #cv2.imshow("masked", masked_image)
+        #cv2.imshow("gray_masked", gray_image)
         cv2.waitKey(3)
         
     def robot_movement(self):
@@ -152,9 +152,9 @@ class TurtlebotDriving:
             nothing
         arguments: 
             none"""
+        self.rate.sleep()
         while not rospy.is_shutdown():
             self.rate.sleep()
-            #self.proportional_control()
             self.random_walk()
 
     def obstacle_avoidance(self):
@@ -209,9 +209,7 @@ class TurtlebotDriving:
     def wall_following(self):
         """future wall following"""
         print 'following'
-
-    def proportional_control(self):
-        return
+        
 
     def random_walk(self):
         """Moves robot forward for three meters before turning a random direction.
@@ -229,8 +227,9 @@ class TurtlebotDriving:
 
             x1 = self.pose.x
             y1 = self.pose.y
-            while self.distance < 3:
+            while not rospy.is_shutdown():
                 self.obstacle_avoidance()
+                move_cmd.angular.z = self.proportional_z
                 self.pub.publish(move_cmd)
                 self.rate.sleep()
                 x2 = self.pose.x
@@ -238,12 +237,14 @@ class TurtlebotDriving:
                 self.distance += abs(x2 - x1) + abs(y2 - y1)
                 x1 = self.pose.x
                 y1 = self.pose.y
+                if self.distance >= 3 and not self.pillar_found:
+                    break
 
             print "RANDOM TURN!"
             target_theta = uniform(0, 2*pi)
-            self.turn_to_theta(target_theta)
+            self.turn_to_theta(target_theta, True)
 
-    def turn_to_theta(self, target_theta):
+    def turn_to_theta(self, target_theta, breakout=False):
         """Turns the robot to the desired orientation via the shortest arc.
         
         returns: 
@@ -279,7 +280,7 @@ class TurtlebotDriving:
         print "total radians to turn {}".format(total_to_turn)
         t0 = self.pose.theta
 
-        while total_turned < total_to_turn:
+        while total_turned < total_to_turn and not (breakout and self.pillar_found):
             self.pub.publish(move_cmd)
             self.rate.sleep()
             t1 = self.pose.theta
