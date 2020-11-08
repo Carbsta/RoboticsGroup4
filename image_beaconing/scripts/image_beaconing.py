@@ -46,12 +46,14 @@ class TurtlebotDriving:
         self.range_cones = [0] * 6
         self.range_flags = [False] * 6
         self.distance = 0
-        self.obstacle_range = 0.5
+        self.obstacle_range = 0.35
         self.err = 0
         self.proportional_z = 0
         self.pillar_found = False
         self.bridge = cv_bridge.CvBridge()
-        cv2.namedWindow("original", 1)
+        self.beaconing_disabled = False
+        self.beacon_cooldown = 2
+        self.beacon_cooldown_start = 0
         self.pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
         self.odom_sub = rospy.Subscriber('odom', Odometry,self.odom_callback)
         self.laser_sub = rospy.Subscriber('/scan', LaserScan,self.scan_callback)
@@ -122,24 +124,40 @@ class TurtlebotDriving:
 
         mask = cv2.inRange(hsv_image, lower_hsv_green, upper_hsv_green)
 
-        M = cv2.moments(mask)
+        rotated_mask = cv2.rotate(mask, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        _, contours, hierarchy = cv2.findContours(rotated_mask,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
 
-        # print(M)
-        # condition never true , if removed divide by 0 error
+        base = np.zeros( (w/4, h/4) )
+        single_mask_rotated = cv2.drawContours(base, contours, 0, (255),-1)
+
+        single_mask = cv2.rotate(single_mask_rotated, cv2.ROTATE_90_CLOCKWISE)
+
+        M = cv2.moments(single_mask)
+
         if M['m00'] > 0:
             cX = int(M["m10"] / M["m00"])
             cY = int(M["m01"] / M["m00"])
             cv2.circle(image_resized,(cX,cY), 5, (0,0,255), -1)
-            self.pillar_found = True
-            self.proportional_z = -float(self.err) / 100
-            self.err = cX- w/8
+            if self.beaconing_disabled:
+                self.proportional_z = 0
+                if rospy.Time.now().to_sec() - self.beacon_cooldown_start >= self.beacon_cooldown:
+                    self.beaconing_disabled = False
+                    print "BEACONING ENABLED\n"
+            else:
+                self.err = cX- w/8
+                self.pillar_found = True
+                self.proportional_z = -float(self.err) / 100
         else:
             self.pillar_found = False
             self.proportional_z = 0
 
-        cv2.imshow("window", image_resized)
-        #cv2.imshow("masked", masked_image)
-        #cv2.imshow("gray_masked", gray_image)
+        
+        rotated_output = cv2.rotate(image_resized, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        cv2.drawContours(rotated_output, contours, -1, (0,255,0), 3)
+        output = cv2.rotate(rotated_output, cv2.ROTATE_90_CLOCKWISE)
+        cv2.imshow("single mask", single_mask)
+        cv2.imshow("window", output)
+
         cv2.waitKey(3)
         
     def robot_movement(self):
@@ -186,7 +204,10 @@ class TurtlebotDriving:
                     target_theta = (self.pose.theta + pi/16)
                     self.turn_to_theta(target_theta)
 
+            self.beacon_cooldown_start = rospy.Time.now().to_sec()
+            self.beaconing_disabled = True
             print "Avoiding Complete."
+            print "BEACONING DISABLED\n"
         
         if self.range_flags[2]:
             print 'AVOIDING FRONT LEFT!'
@@ -195,7 +216,10 @@ class TurtlebotDriving:
                 target_theta = (self.pose.theta - pi/16)
                 self.turn_to_theta(target_theta)
 
+            self.beacon_cooldown_start = rospy.Time.now().to_sec()
+            self.beaconing_disabled = True
             print "Avoiding Complete."
+            print "BEACONING DISABLED\n"
         
         if self.range_flags[3]:
             print 'AVOIDING FRONT RIGHT!'
@@ -204,7 +228,10 @@ class TurtlebotDriving:
                 target_theta = (self.pose.theta + pi/16)
                 self.turn_to_theta(target_theta)
 
+            self.beacon_cooldown_start = rospy.Time.now().to_sec()   
+            self.beaconing_disabled = True
             print "Avoiding Complete."
+            print "BEACONING DISABLED\n"
 
     def wall_following(self):
         """future wall following"""
