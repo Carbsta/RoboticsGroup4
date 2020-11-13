@@ -26,6 +26,7 @@ class TurtlebotDriving:
     Publishes to /cmd_vel
     Subscribes to /odom with the method odom_callback
     Subscribes to /scan with the method scan_callback
+    Subscribes to /camera/rgb/image_raw with the method image_callback
     
     member variables:
         rate: refresh rate in Hz of actions, used to set intervals of sleep
@@ -35,6 +36,13 @@ class TurtlebotDriving:
         range_flags: boolean values that are true if the value of a cone is less than obstacle_range
         distance: distance travelled by the robot in a straight line
         obstacle_range: parameter to control how close the robot can get to obstacles
+        err: Error from beacon to calculate heading via proportional control
+        proportional_z: the desired angular velocity of the robotic to adjust its heading to face a beacon target
+        pillar_found: flag used to override random walk behaviour while beaconing
+        beaconing_disabled: flag used to override beaconing while avoding obstacles
+        beacon_cooldown: time between the end of the obstacle avoidance routine and re-enabling of beaconing
+        beacon_cooldown_start: used to track the time at the start of the beaconing cooldown
+        bridge: openCV bridge
         pub: publisher channel to post movement commands to
         odom_sub: subscriber channel to recieve odometry data
         laser_sub: subscriber channel to recieve scan data"""
@@ -50,10 +58,10 @@ class TurtlebotDriving:
         self.err = 0
         self.proportional_z = 0
         self.pillar_found = False
-        self.bridge = cv_bridge.CvBridge()
         self.beaconing_disabled = False
         self.beacon_cooldown = 2
         self.beacon_cooldown_start = 0
+        self.bridge = cv_bridge.CvBridge()
         self.pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
         self.odom_sub = rospy.Subscriber('odom', Odometry,self.odom_callback)
         self.laser_sub = rospy.Subscriber('/scan', LaserScan,self.scan_callback)
@@ -124,12 +132,16 @@ class TurtlebotDriving:
 
         mask = cv2.inRange(hsv_image, lower_hsv_green, upper_hsv_green)
 
+        # Contour detection starts from the bottom of the image, so we rotate the image 90 degrees counter clockwise
+        # To ensure that the first beacon detected is always the left most beacon.
         rotated_mask = cv2.rotate(mask, cv2.ROTATE_90_COUNTERCLOCKWISE)
         _, contours, hierarchy = cv2.findContours(rotated_mask,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
 
+        # this draws a new mask by drawing the first contour as a white fill on a black image, always drawing the leftmost pillar
         base = np.zeros( (w/4, h/4) )
         single_mask_rotated = cv2.drawContours(base, contours, 0, (255),-1)
 
+        # We rotate this new mask back for proportional control
         single_mask = cv2.rotate(single_mask_rotated, cv2.ROTATE_90_CLOCKWISE)
 
         M = cv2.moments(single_mask)
@@ -138,6 +150,7 @@ class TurtlebotDriving:
             cX = int(M["m10"] / M["m00"])
             cY = int(M["m01"] / M["m00"])
             cv2.circle(image_resized,(cX,cY), 5, (0,0,255), -1)
+            # Beaconing is disabled at the *end* of the obstacle avoidance routine to avoid triggering avoidance again immediately
             if self.beaconing_disabled:
                 self.proportional_z = 0
                 if rospy.Time.now().to_sec() - self.beacon_cooldown_start >= self.beacon_cooldown:
@@ -164,16 +177,15 @@ class TurtlebotDriving:
         """Robot Movement Control
         
         Entry function from main, calls random_walk() continuously
-        Can be extended to run wall following behaviour
+        Can be extended to run wall following behaviour.
+        Currently just starts random walk method which is the current top level routine.
         
         returns: 
             nothing
         arguments: 
             none"""
         self.rate.sleep()
-        while not rospy.is_shutdown():
-            self.rate.sleep()
-            self.random_walk()
+        self.random_walk()
 
     def obstacle_avoidance(self):
         """Obstacle Avoidance
@@ -264,7 +276,7 @@ class TurtlebotDriving:
                 self.distance += abs(x2 - x1) + abs(y2 - y1)
                 x1 = self.pose.x
                 y1 = self.pose.y
-                if self.distance >= 3 and not self.pillar_found:
+                if self.distance >= 3 and not self.pillar_found: # keep going forward if beaconing
                     break
 
             print "RANDOM TURN!"
@@ -307,6 +319,7 @@ class TurtlebotDriving:
         print "total radians to turn {}".format(total_to_turn)
         t0 = self.pose.theta
 
+        #breakout and pillar_found used in conjunction to decide if a turn should be ended early by beaconing
         while total_turned < total_to_turn and not (breakout and self.pillar_found):
             self.pub.publish(move_cmd)
             self.rate.sleep()
