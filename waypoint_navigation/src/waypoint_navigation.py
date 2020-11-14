@@ -25,7 +25,10 @@ class Map:
         self.waypoints.append(point)
     
     def to_grid(self, point):
-        gp = ( int( (point[0] - self.origin[0]) / self.resolution), int( ( point[1] - self.origin[1] ) / self.resolution))
+        gp = ( 
+                int( (point[0] - self.origin[0]) / self.resolution),
+                int( ( point[1] - self.origin[1] ) / self.resolution)
+            )
         if gp[0] >= self.size[0] or gp[1] >= self.size[1] or gp[0] < 0 or gp[1] < 0:
             return None
         else:
@@ -33,14 +36,9 @@ class Map:
 
     def to_world(self, point):
         wp = (
-                ( ( (point[0] + self.origin[0]) * self.resolution) + self.resolution / 2.0),
-                ( ( (point[1] + self.origin[1]) * self.resolution) + self.resolution / 2.0)
+                ( ( self.origin[0] + (point[0] * self.resolution)) + self.resolution / 2.0),
+                ( ( self.origin[1] + (point[1] * self.resolution)) + self.resolution / 2.0)
             )
-
-        """ lowerbound_x = self.origin[0]
-        lowerbound_y = self.origin[1]
-        upperbound_x = self.origin[0] + (self.size[0] * self.resolution)
-        upperbound_y = self.origin[1] + (self.size[1] * self.resolution) """
 
         if point[0] >= self.size[0] or point[0] < 0 or point[1] > self.size[1] or point[1] < 0:
             return None
