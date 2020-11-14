@@ -4,7 +4,7 @@ import actionlib
 from geometry_msgs.msg import Point
 from nav_msgs.msg import Odometry
 from actionlib_msgs.msg import *
-from math import pi, sqrt, floor
+from math import pi, sqrt
 import numpy as np
 from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 
@@ -14,37 +14,35 @@ from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
         self.y = y """
 
 class Map:
-    def __init__(self, size, resolution):
+    def __init__(self, origin, size, resolution):
+        self.origin = origin
         self.size = size
         self.resolution = resolution
-        self.grid = [-1] * (size[0] * size[1])
+        self.grid = [-1] * (self.size[0] * self.size[1])
         self.waypoints = []
     
     def add_waypoint(self, point):
         self.waypoints.append(point)
     
-    def to_grid(point, origin, size, resolution):
-        gp = ( 
-                floor( point.x - origin.x) / res),
-                floor( point.y - origin.y ) / res)
-                )
-        if gp[0] >= size[0] or gp[1] >= size[1] or gp[0] < 0 or gp[1] < 0:
+    def to_grid(self, point):
+        gp = ( int( (point[0] - self.origin[0]) / self.resolution), int( ( point[1] - self.origin[1] ) / self.resolution))
+        if gp[0] >= self.size[0] or gp[1] >= self.size[1] or gp[0] < 0 or gp[1] < 0:
             return None
         else:
             return gp
 
-    def to_world(point, origin, size, resolution):
+    def to_world(self, point):
         wp = (
-                ( ( (point.x + origin.x) * res) + res / 2 ),
-                ( ( (point.y + origin.y) * res) + res / 2 )
+                ( ( (point[0] + self.origin[0]) * self.resolution) + self.resolution / 2.0),
+                ( ( (point[1] + self.origin[1]) * self.resolution) + self.resolution / 2.0)
             )
 
-        lowerbound_x = origin[0] - ((size[0] * res) / 2)
-        lowerbound_y = origin[1] - ((size[1] * res) / 2)
-        upperbound_x = origin[0] + ((size[0] * res) / 2)
-        upperbound_y = origin[1] + ((size[1] * res) / 2)
+        """ lowerbound_x = self.origin[0]
+        lowerbound_y = self.origin[1]
+        upperbound_x = self.origin[0] + (self.size[0] * self.resolution)
+        upperbound_y = self.origin[1] + (self.size[1] * self.resolution) """
 
-        if wp[0] > upperbound_x or wp[0] < lowerbound_x or wp[1] > upperbound_y or wp[1] < lowerbound_y:
+        if point[0] >= self.size[0] or point[0] < 0 or point[1] > self.size[1] or point[1] < 0:
             return None
         else:
             return wp
