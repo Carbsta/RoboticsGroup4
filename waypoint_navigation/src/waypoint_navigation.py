@@ -2,7 +2,7 @@
 import rospy
 import actionlib
 from geometry_msgs.msg import Point
-from nav_msgs.msg import Odometry
+from nav_msgs.msg import Odometry, OccupancyGrid
 from actionlib_msgs.msg import *
 from math import pi, sqrt
 import numpy as np
@@ -18,8 +18,25 @@ class Map:
         self.origin = origin
         self.size = size
         self.resolution = resolution
-        self.grid = [-1] * (self.size[0] * self.size[1])
         self.waypoints = []
+        self.grid = OccupancyGrid()
+
+        self.initGrid()
+
+    def initGrid():
+        self.grid.header.seq = 1
+        self.grid.header.frame_id = "/map"
+        self.grid.info.origin.position.z = 0
+        self.grid.info.origin.orientation.x = 0
+        self.grid.info.origin.orientation.y = 0
+        self.grid.info.origin.orientation.z = 0
+        self.grid.info.origin.orientation.w = 1
+        self.grid.data = [-1] * (self.size[0] * self.size[1])
+
+    def updateOcGrid(self, world_point):
+        gp = self.to_grid(world_point)
+        grid_index = self.to_index(gp[0], gp[1], self.size[0])
+        self.grid.data[grid_index] = 1
     
     def add_waypoint(self, point):
         self.waypoints.append(point)
@@ -65,6 +82,10 @@ class TurtlebotDriving:
         self.rate = rospy.Rate(10)
         self.map = Map((20,20), 1)
         self.initialise_waypoints()
+        self.sub = rospy.Subscriber('odom',Odometry,self.odom_callback)
+
+    def odom_callback(self, msg):
+        self.updateOcGrid([msg.pose.pose.position.x, msg.pose.pose.position.y])
 
     def initialise_waypoints(self):
         self.map.add_waypoint(Point(-3, 1, 0))
