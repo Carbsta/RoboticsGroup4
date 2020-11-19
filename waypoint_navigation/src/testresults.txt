@@ -1,0 +1,100 @@
+Map being used by the robot:
+to grid
+centre should return (10,10)
+(10, 10)
+lower bounds should return (0, 0)
+(0, 0)
+out of bounds should return None
+None
+upper bounds should return (19,19)
+(19, 19)
+out of bounds should return None
+None
+
+to world
+centre should return (0.5, 0.5)
+(0.5, 0.5)
+lower bounds should return (-9.5, -9.5)
+(-9.5, -9.5)
+out of bounds should return None
+None
+upper bounds should return (9.5, 9.5)
+(9.5, 9.5)
+out of bounds should return None
+None
+
+0.5 resolution map
+to grid
+centre should return (10,10)
+(10, 10)
+lower bounds should return (0, 0)
+(0, 0)
+out of bounds should return None
+None
+upper bounds should return (19, 19)
+(19, 19)
+out of bounds should return None
+None
+
+to world
+centre should return (-4.75, -4.75)
+(-4.75, -4.75)
+lower bounds should return (-9.75, -9.75)
+(-9.75, -9.75)
+out of bounds should return None
+None
+upper bounds should return (-0.25, -0.25)
+(-0.25, -0.25)
+out of bounds should return None
+None
+2 resolution map:
+to grid
+centre should return (10,10)
+(10, 10)
+lower bounds should return (0, 0)
+(0, 0)
+out of bounds should return None
+None
+upper bounds should return (19, 19)
+(19, 19)
+out of bounds should return None
+None
+
+to world
+centre should return (11, 11)
+(11.0, 11.0)
+lower bounds should return (-9, -9)
+(-9.0, -9.0)
+out of bounds should return None
+None
+upper bounds should return (29, 29)
+(29.0, 29.0)
+out of bounds should return None
+None
+
+rectangular map bound testing
+in bounds
+(4, 9)
+(4.5, 9.5)
+out of bounds should all return None
+None
+None
+None
+None
+in bounds
+(9, 4)
+(9.5, 4.5)
+out of bounds should all return None
+None
+None
+None
+None
+module wiki test cases
+should return (5,5)
+(5, 5)
+should return (10,10)
+(10, 10)
+should return (5,5)
+(5, 5)
+should return (4.5, 4.5)
+(4.5, 4.5)

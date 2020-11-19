@@ -63,7 +63,7 @@ class Map:
                 ( ( self.origin[1] + (point[1] * self.resolution)) + self.resolution / 2.0)
             )
 
-        if point[0] >= self.size[0] or point[0] < 0 or point[1] > self.size[1] or point[1] < 0:
+        if point[0] >= self.size[0] or point[0] < 0 or point[1] >= self.size[1] or point[1] < 0:
             return None
         else:
             return wp
