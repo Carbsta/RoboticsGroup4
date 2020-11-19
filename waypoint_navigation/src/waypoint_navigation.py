@@ -9,11 +9,6 @@ from math import pi, sqrt
 import numpy as np
 from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 
-""" class Waypoint:
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y """
-
 class Map:
     def __init__(self, (x, y), (size_x, size_y), resolution):
         self.origin = (x, y)
@@ -90,22 +85,17 @@ class Map:
                     row.insert(0,"░░")
                 else:
                     row.insert(0,"▓▓")
-                
-            
-            
 
 class TurtlebotDriving:
     """Robot Class
     
     Contains methods for both RANDOM WALK and OBSTACLE AVOIDANCE.
-    Publishes to /cmd_vel
     Subscribes to /odom with the method odom_callback
-    Subscribes to /scan with the method scan_callback
-    Subscribes to /camera/rgb/image_raw with the method image_callback
     
     member variables:
         rate: refresh rate in Hz of actions, used to set intervals of sleep
-        pose: robot pose object"""
+        pose: robot pose object
+        map: Map object containing occupancy grid and waypoints"""
     def __init__(self):
         rospy.init_node('turtlebot_driving', anonymous=True)
         self.rate = rospy.Rate(10)
@@ -114,11 +104,18 @@ class TurtlebotDriving:
         self.sub = rospy.Subscriber('odom',Odometry,self.odom_callback)
 
     def odom_callback(self, msg):
+        """Updates the occupancy grid, displays robot position and calls method to display the grid
+        
+        returns:
+            nothing
+        arguments:
+            msg: Pose message"""
         self.map.updateOcGrid([msg.pose.pose.position.x, msg.pose.pose.position.y])
         print (msg.pose.pose.position.x, msg.pose.pose.position.y)
         self.map.display()
 
     def initialise_waypoints(self):
+        """creates waypoints for each room"""
         self.map.add_waypoint(Point(-3, 1, 0))
         self.map.add_waypoint(Point(-6, 3, 0))
         self.map.add_waypoint(Point(-6, -3, 0))
@@ -129,9 +126,7 @@ class TurtlebotDriving:
     def robot_movement(self):
         """Robot Movement Control
         
-        Entry function from main, calls random_walk() continuously
-        Can be extended to run wall following behaviour.
-        Currently just starts random walk method which is the current top level routine.
+        Entry function from main, iterates over the waypoints continuously to navigate between them.
         
         returns: 
             nothing
@@ -142,7 +137,14 @@ class TurtlebotDriving:
                 self.move_to_waypoint(wp)
     
     def move_to_waypoint(self, wp):
-        ac = actionlib.SimpleActionClient("move_base",MoveBaseAction)
+        """Sends commands to move the robot to a desired goal location.
+        
+        arguments:
+            wp: Point object that represents the goal location.
+        returns:
+            Boolean: True if destination is reached, False if 120 seconds pass without reaching the destination."""
+
+        ac = actionlib.SimpleActionClient("move_base",MoveBaseAction) # action client communicates with the move_base server
 
         while(not ac.wait_for_server(rospy.Duration.from_sec(5.0))):
               rospy.loginfo("Waiting for the move_base action server to come up")
