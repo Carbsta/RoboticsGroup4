@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
 import rospy
 import actionlib
 from geometry_msgs.msg import Point
@@ -14,18 +15,24 @@ from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
         self.y = y """
 
 class Map:
-    def __init__(self, origin, size, resolution):
-        self.origin = origin
-        self.size = size
+    def __init__(self, (x, y), (size_x, size_y), resolution):
+        self.origin = (x, y)
+        self.size = (size_x, size_y)
         self.resolution = resolution
         self.waypoints = []
         self.grid = OccupancyGrid()
+        self.robot_pos = 0
 
         self.initGrid()
 
-    def initGrid():
+    def initGrid(self):
         self.grid.header.seq = 1
         self.grid.header.frame_id = "/map"
+        self.grid.info.resolution = self.resolution
+        self.grid.info.width = self.size[0]
+        self.grid.info.height = self.size[1]
+        self.grid.info.origin.position.x = self.origin[0]
+        self.grid.info.origin.position.y = self.origin[1]
         self.grid.info.origin.position.z = 0
         self.grid.info.origin.orientation.x = 0
         self.grid.info.origin.orientation.y = 0
@@ -35,8 +42,12 @@ class Map:
 
     def updateOcGrid(self, world_point):
         gp = self.to_grid(world_point)
-        grid_index = self.to_index(gp[0], gp[1], self.size[0])
-        self.grid.data[grid_index] = 1
+        if gp == None:
+            print "Out of Bounds"
+        else:
+            grid_index = self.to_index(gp[0], gp[1], self.size[0])
+            self.robot_pos = grid_index
+            self.grid.data[grid_index] = 1
     
     def add_waypoint(self, point):
         self.waypoints.append(point)
@@ -62,8 +73,26 @@ class Map:
         else:
             return wp
 
-    def to_index(gx, gy, size_x):
+    def to_index(self, gx, gy, size_x):
         return gy * size_x + gx
+
+    def display(self):
+        row = []
+        for x in range(self.size[0] * self.size[1], 0, -1):
+            if x % self.size[0] == 0:
+                print("".join(row))
+                row = []
+            item = self.grid.data[x-1]
+            if x-1 == self.robot_pos:
+                row.insert(0,"@@")
+            else:
+                if item == -1:
+                    row.insert(0,"░░")
+                else:
+                    row.insert(0,"▓▓")
+                
+            
+            
 
 class TurtlebotDriving:
     """Robot Class
@@ -80,12 +109,14 @@ class TurtlebotDriving:
     def __init__(self):
         rospy.init_node('turtlebot_driving', anonymous=True)
         self.rate = rospy.Rate(10)
-        self.map = Map((20,20), 1)
+        self.map = Map( (-10, -10 ), (20,20), 1)
         self.initialise_waypoints()
         self.sub = rospy.Subscriber('odom',Odometry,self.odom_callback)
 
     def odom_callback(self, msg):
-        self.updateOcGrid([msg.pose.pose.position.x, msg.pose.pose.position.y])
+        self.map.updateOcGrid([msg.pose.pose.position.x, msg.pose.pose.position.y])
+        print (msg.pose.pose.position.x, msg.pose.pose.position.y)
+        self.map.display()
 
     def initialise_waypoints(self):
         self.map.add_waypoint(Point(-3, 1, 0))
