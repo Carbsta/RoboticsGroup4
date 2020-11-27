@@ -100,9 +100,16 @@ class TurtleBot():
         self.map = Map( (-10, -10 ), (20,20), 1)
         self.ranges = [0] * 360
         self.found = {"fire_hydrant":False, "green_box":False, "mail_box":False, "number_5":False}
+        self.beaconing = False
+        self.green_mask = None
+        self.display_image = None
         self.odom_sub = rospy.Subscriber('odom',Odometry,self.odom_callback)
         self.laser_sub = rospy.Subscriber('/scan', LaserScan,self.scan_callback)
-        self.image_sub = rospy.Subscriber('/camera/rgb/image_raw', Image, self.image_callback)
+        self.image_sub = rospy.Subscriber('/camera/rgb/image_raw', Image, self.rgb_callback)
+        self.depth_sub = rospy.Subscriber('/camera/depth/image_raw', Image, self.depth_callback)
+        self.cancel_pub = rospy.Publisher('/move_base/cancel', GoalID, queue_size=1)
+        self.bridge = cv_bridge.CvBridge()
+        self.ac = actionlib.SimpleActionClient("move_base",MoveBaseAction) # action client communicates with the move_base server
         
     def initialisePose(self):
         posepub = rospy.Publisher("/initialpose",PoseWithCovarianceStamped, queue_size=1)
@@ -138,13 +145,81 @@ class TurtleBot():
     def robot_movement(self):
         while not rospy.is_shutdown() and not all(x==True for x in self.found.values()):
             for wp in self.map.waypoints:
+
+                """ if self.beaconing:
+                    beacon_to_object() """
+
                 self.move_to_waypoint(wp)
 
     def odom_callback(self, msg):
         pass
 
-    def image_callback(self, msg):
+    def beacon_to_object():
         pass
+
+    def depth_callback(self, msg):
+        depth_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough")
+        #processing_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="16UC1")
+        
+        
+
+        (h, w) = depth_image.shape[:2]
+
+        image_resized = cv2.resize(depth_image, (w/4, h/4))
+
+        output = np.zeros( (h/4, w/4) )
+        
+
+        intermediate = self.bridge.cv2_to_imgmsg(self.green_mask, encoding="passthrough")
+        depth_mask = self.bridge.imgmsg_to_cv2(intermediate, desired_encoding="32FC1")
+
+        if self.beaconing:
+            output = cv2.bitwise_and(image_resized, depth_mask)
+        
+        M = cv2.moments(output)
+
+        if M['m00'] > 0:
+            cX = int(M["m10"] / M["m00"])
+            cY = int(M["m01"] / M["m00"])
+            cv2.circle(self.display_image,(cX,cY), 5, (0,0,255), -1)
+            if self.beaconing:
+                print "cX {} cY {}".format(cX,cY)
+                print "depth {}".format(image_resized[cY][cX])
+
+        cv2.imshow("window", self.display_image)
+        cv2.imshow("depth", image_resized)
+        cv2.imshow("depth masked", output)
+        cv2.imshow("green mask", self.green_mask)
+        cv2.waitKey(3)
+        
+
+    def rgb_callback(self, msg):
+        """ Callback method for the image recognition
+        
+        returns: 
+            nothing
+        arguments:
+            msg: scan data used to populate list of ranges from /camera/rgb/image_raw topic"""
+        image = self.bridge.imgmsg_to_cv2(msg,desired_encoding='bgr8')
+        (h, w) = image.shape[:2]
+        self.display_image = cv2.resize(image, (w/4, h/4))
+        hsv_image = cv2.cvtColor(self.display_image, cv2.COLOR_BGR2HSV)
+
+        lower_hsv_green = np.array([40, 200, 20], dtype="uint8")
+        upper_hsv_green = np.array([70, 255, 255], dtype="uint8")
+
+        self.green_mask = cv2.inRange(hsv_image, lower_hsv_green, upper_hsv_green)
+
+        
+        # Contour detection starts from the bottom of the image, so we rotate the image 90 degrees counter clockwise
+        # To ensure that the first beacon detected is always the left most beacon.
+        rotated_mask = cv2.rotate(self.green_mask, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        _, contours, hierarchy = cv2.findContours(rotated_mask,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
+
+        if contours and not self.found["green_box"] and not self.beaconing:
+            # self.cancel_pub.publish(GoalID())
+            self.beaconing = True
+
 
     def move_to_waypoint(self, wp):
         """Sends commands to move the robot to a desired goal location.
@@ -154,9 +229,9 @@ class TurtleBot():
         returns:
             Boolean: True if destination is reached, False if 120 seconds pass without reaching the destination."""
 
-        ac = actionlib.SimpleActionClient("move_base",MoveBaseAction) # action client communicates with the move_base server
+        
 
-        while(not ac.wait_for_server(rospy.Duration.from_sec(5.0))):
+        while(not self.ac.wait_for_server(rospy.Duration.from_sec(5.0))):
               rospy.loginfo("Waiting for the move_base action server to come up")
 
         goal = MoveBaseGoal()
@@ -171,11 +246,11 @@ class TurtleBot():
         goal.target_pose.pose.orientation.w = 1.0
 
         rospy.loginfo("Sending goal location ...")
-        ac.send_goal(goal)
+        self.ac.send_goal(goal)
 
-        ac.wait_for_result(rospy.Duration(120))
+        self.ac.wait_for_result(rospy.Duration(60))
 
-        if(ac.get_state() == GoalStatus.SUCCEEDED):
+        if(self.ac.get_state() == GoalStatus.SUCCEEDED):
             rospy.loginfo("You have reached the destination")
             return True
         else:
