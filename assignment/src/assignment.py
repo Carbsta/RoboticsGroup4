@@ -12,6 +12,7 @@ from nav_msgs.msg import Odometry, OccupancyGrid
 from sensor_msgs.msg import LaserScan, Image
 from actionlib_msgs.msg import *
 from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
+from math import cos, sin, pi, isnan
 
 class Map:
     def __init__(self, (x, y), (size_x, size_y), resolution):
@@ -93,17 +94,29 @@ class Map:
                     else:
                         row.insert(0,"██")
 
+class Pose:
+    """Simple Pose Object
+
+    Contains the values set by odom_callback"""
+    def __init__(self,theta,x,y):
+        self.theta = theta
+        self.x = x
+        self.y = y
+
 class TurtleBot():
     def __init__(self):
         rospy.init_node('turtlebot', anonymous=True)
         self.rate = rospy.Rate(10)
         self.map = Map( (-10, -10 ), (20,20), 1)
         self.ranges = [0] * 360
+        self.pose = Pose(0,0,0)
         self.found = {"fire_hydrant":False, "green_box":False, "mail_box":False, "number_5":False}
-        self.beaconing = False
+        self.goal_estimates = {"fire_hydrant":None, "green_box":None, "mail_box":None, "number_5":None}
+        self.object_seen = False
+        self.exploring = True
         self.green_mask = None
         self.display_image = None
-        self.odom_sub = rospy.Subscriber('odom',Odometry,self.odom_callback)
+        self.amcl_sub = rospy.Subscriber('/amcl_pose',PoseWithCovarianceStamped,self.amcl_callback)
         self.laser_sub = rospy.Subscriber('/scan', LaserScan,self.scan_callback)
         self.image_sub = rospy.Subscriber('/camera/rgb/image_raw', Image, self.rgb_callback)
         self.depth_sub = rospy.Subscriber('/camera/depth/image_raw', Image, self.depth_callback)
@@ -146,16 +159,21 @@ class TurtleBot():
         while not rospy.is_shutdown() and not all(x==True for x in self.found.values()):
             for wp in self.map.waypoints:
 
-                """ if self.beaconing:
-                    beacon_to_object() """
+                if self.object_seen:
+                    self.beacon_to_object()
 
                 self.move_to_waypoint(wp)
 
-    def odom_callback(self, msg):
-        pass
-
-    def beacon_to_object():
-        pass
+    def beacon_to_object(self):
+        for key,value in self.found.iteritems():
+            if self.found[key] == False and self.goal_estimates[key] != None:
+                self.move_to_waypoint(self.goal_estimates[key])
+                if(self.ac.get_state() == GoalStatus.SUCCEEDED):
+                    print "I have found {}".format(key)
+                    self.found[key] = True
+                else:
+                    print "failed to reach {}".format(key)
+        self.exploring = True
 
     def depth_callback(self, msg):
         depth_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough")
@@ -173,7 +191,7 @@ class TurtleBot():
         intermediate = self.bridge.cv2_to_imgmsg(self.green_mask, encoding="passthrough")
         depth_mask = self.bridge.imgmsg_to_cv2(intermediate, desired_encoding="32FC1")
 
-        if self.beaconing:
+        if self.object_seen:
             output = cv2.bitwise_and(image_resized, depth_mask)
         
         M = cv2.moments(output)
@@ -182,9 +200,26 @@ class TurtleBot():
             cX = int(M["m10"] / M["m00"])
             cY = int(M["m01"] / M["m00"])
             cv2.circle(self.display_image,(cX,cY), 5, (0,0,255), -1)
-            if self.beaconing:
+            if self.object_seen and self.exploring and not self.found["green_box"]:
+                
+                err = cX- w/8
+                proportional_z = -float(err) / 100
+                depth = image_resized[cY][cX]
+                print "x,y,theta: {},{},{}".format(self.pose.x,self.pose.y,self.pose.theta)
+                print "proportional_z: {}".format(proportional_z)
                 print "cX {} cY {}".format(cX,cY)
-                print "depth {}".format(image_resized[cY][cX])
+                print "depth {}".format(depth)
+                
+                if not isnan(depth):
+                    
+                    x = self.pose.x + (depth * sin(self.pose.theta + proportional_z))
+                    y = self.pose.y + (depth * cos(self.pose.theta + proportional_z))
+                    self.goal_estimates["green_box"] = Point(x, y, 0)
+                    print "current location {}, {}, theta: {}".format(self.pose.x, self.pose.y, self.pose.theta)
+                    print "estimated location {} , {}, heading: {}".format(x, y, self.pose.theta + proportional_z)
+                    self.exploring = False
+                    self.cancel_pub.publish(GoalID())
+
 
         cv2.imshow("window", self.display_image)
         cv2.imshow("depth", image_resized)
@@ -216,9 +251,9 @@ class TurtleBot():
         rotated_mask = cv2.rotate(self.green_mask, cv2.ROTATE_90_COUNTERCLOCKWISE)
         _, contours, hierarchy = cv2.findContours(rotated_mask,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
 
-        if contours and not self.found["green_box"] and not self.beaconing:
+        if contours and not self.found["green_box"] and not self.object_seen:
             # self.cancel_pub.publish(GoalID())
-            self.beaconing = True
+            self.object_seen = True
 
 
     def move_to_waypoint(self, wp):
@@ -259,6 +294,18 @@ class TurtleBot():
 
     def scan_callback(self, msg):
         self.ranges = msg.ranges
+
+    def amcl_callback(self, msg):
+        # Get (x, y, theta) specification from odometry topic
+        quarternion = [msg.pose.pose.orientation.x,msg.pose.pose.orientation.y,\
+                    msg.pose.pose.orientation.z, msg.pose.pose.orientation.w]
+        (roll, pitch, yaw) = tf.transformations.euler_from_quaternion(quarternion)
+        # Make the range from 0 to +2pi to avoid negative value issues
+        if yaw < 0:
+            yaw += 2*pi
+        self.pose.theta = yaw
+        self.pose.x = msg.pose.pose.position.x
+        self.pose.y = msg.pose.pose.position.y
 
 
     def frontier_exploration(self):
