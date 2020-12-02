@@ -22,6 +22,8 @@ class Map:
         self.waypoints = []
         self.grid = OccupancyGrid()
         self.robot_pos = 0
+        self.occupied_thresh = 0.65
+        self.free_thresh = 0.196
 
         self.initGrid()
 
@@ -39,6 +41,33 @@ class Map:
         self.grid.info.origin.orientation.z = 0
         self.grid.info.origin.orientation.w = 1
         self.grid.data = [-1] * (self.size[0] * self.size[1])
+    
+    def updateMap(self, angle_cones, max_range, robot_pose):
+        # update robot position
+        robot_grid_pose = self.to_grid((robot_pose.x, robot.pose.y))
+        self.robot_pos = self.to_index(robot_grid_pose[0], robot_grid_pose[1], self.size[0])
+
+        # fill occupancy grid
+        for i in range(len(angle_cones)):
+            if angle_cones[i] != float("inf"):
+                px_world = angle_cones[i] * cos((i * 20 + 10) * pi / 180) + robot_pose.x
+                py_world = angle_cones[i] * sin((i * 20 + 10) * pi / 180) + robot_pose.y
+
+                gp = self.to_grid((px_world, py_world))
+                print('robot_pose: {}, robot_grid: {}, pworld: {}, gp: {}, distance: {}'.format(
+                    (robot_pose.x, robot_pose.y),
+                    robot_grid_pose,
+                    (px_world, py_world),
+                    gp,
+                    angle_cones[i]
+                ))
+                if gp != None:
+                    grid_index = self.to_index(gp[0], gp[1], self.size[0])
+                    if angle_cones[i] < max_range:
+                        self.grid.data[grid_index] = 100 #occupied by anything
+                    else:
+                        self.grid.data[grid_index] = 10
+                        
 
     def updateOcGrid(self, world_point):
         gp = self.to_grid(world_point)
@@ -116,11 +145,13 @@ class TurtleBot():
         self.exploring = True
         self.green_mask = None
         self.display_image = None
-        self.amcl_sub = rospy.Subscriber('/amcl_pose',PoseWithCovarianceStamped,self.amcl_callback)
-        self.laser_sub = rospy.Subscriber('/scan', LaserScan,self.scan_callback)
-        self.image_sub = rospy.Subscriber('/camera/rgb/image_raw', Image, self.rgb_callback)
-        self.depth_sub = rospy.Subscriber('/camera/depth/image_raw', Image, self.depth_callback)
-        self.cancel_pub = rospy.Publisher('/move_base/cancel', GoalID, queue_size=1)
+        # self.amcl_sub = rospy.Subscriber('/amcl_pose',PoseWithCovarianceStamped,self.amcl_callback)
+        self.amcl_sub = rospy.Subscriber('/odom',Odometry,self.amcl_callback)
+        #self.laser_sub = rospy.Subscriber('/scan', LaserScan,self.scan_callback)
+        #self.image_sub = rospy.Subscriber('/camera/rgb/image_raw', Image, self.rgb_callback)
+        #self.depth_sub = rospy.Subscriber('/camera/depth/image_raw', Image, self.depth_callback)
+        #self.cancel_pub = rospy.Publisher('/move_base/cancel', GoalID, queue_size=1)
+        self.map_sub = rospy.Subscriber('/map', OccupancyGrid, self.map_callback)
         self.bridge = cv_bridge.CvBridge()
         self.ac = actionlib.SimpleActionClient("move_base",MoveBaseAction) # action client communicates with the move_base server
         
@@ -130,7 +161,7 @@ class TurtleBot():
         initialpose.header.frame_id = "map"
         initialpose.header.stamp = rospy.Time.now()
         initialpose.pose.pose.position.x = -1
-        initialpose.pose.pose.position.y = 4
+        initialpose.pose.pose.position.y = 1
         initialpose.pose.pose.position.z = 0
         initialpose.pose.pose.orientation.x = 0
         initialpose.pose.pose.orientation.y = 0
@@ -152,9 +183,9 @@ class TurtleBot():
 
     def entry_function(self):
         self.initialisePose()
-        self.initialise_waypoints()
+        # self.initialise_waypoints()
         self.robot_movement()
-
+    
     def robot_movement(self):
         while not rospy.is_shutdown() and not all(x==True for x in self.found.values()):
             for wp in self.map.waypoints:
@@ -292,9 +323,6 @@ class TurtleBot():
             rospy.loginfo("The robot failed to reach the destination")
             return False
 
-    def scan_callback(self, msg):
-        self.ranges = msg.ranges
-
     def amcl_callback(self, msg):
         # Get (x, y, theta) specification from odometry topic
         quarternion = [msg.pose.pose.orientation.x,msg.pose.pose.orientation.y,\
@@ -307,8 +335,15 @@ class TurtleBot():
         self.pose.x = msg.pose.pose.position.x
         self.pose.y = msg.pose.pose.position.y
 
+    def map_callback(self, msg):
+        print('=' * 100)
+        print(msg.info)
+        print(len(msg.data))
+        print('=' * 100)
+        return
 
     def frontier_exploration(self):
+        
         pass
 
     def sense(self):
@@ -317,6 +352,7 @@ class TurtleBot():
 
 if __name__ == '__main__':
     try:
+        print('testing')
         robot = TurtleBot()
         robot.entry_function()
     except rospy.ROSInterruptException:
