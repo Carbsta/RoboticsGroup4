@@ -114,8 +114,10 @@ class TurtleBot():
         self.goal_estimates = {"fire_hydrant":None, "green_box":None, "mail_box":None, "number_5":None}
         self.object_seen = False
         self.exploring = True
-        self.green_mask = None
-        self.display_image = None
+        self.green_mask = np.zeros((270, 480))
+        self.red_mask = np.zeros((270, 480))
+        self.blue_mask = np.zeros((270, 480))
+        self.display_image = np.zeros((270, 480))
         self.amcl_sub = rospy.Subscriber('/amcl_pose',PoseWithCovarianceStamped,self.amcl_callback)
         self.laser_sub = rospy.Subscriber('/scan', LaserScan,self.scan_callback)
         self.image_sub = rospy.Subscriber('/camera/rgb/image_raw', Image, self.rgb_callback)
@@ -142,7 +144,7 @@ class TurtleBot():
     def initialise_waypoints(self):
         """creates waypoints for each room"""
         self.map.add_waypoint(Point(-1, 3, 0)) # start corridor A
-        self.map.add_waypoint(Point(-1, -2, 0)) # start corridor B obstacle
+        self.map.add_waypoint(Point(-1, -2, 0)) # start corridor B
         self.map.add_waypoint(Point(2, -3, 0)) # open room A
         self.map.add_waypoint(Point(2, 0, 0)) # open room B
         self.map.add_waypoint(Point(2, 2, 0)) # closed room A
@@ -186,7 +188,6 @@ class TurtleBot():
         image_resized = cv2.resize(depth_image, (w/4, h/4))
 
         output = np.zeros( (h/4, w/4) )
-        
 
         intermediate = self.bridge.cv2_to_imgmsg(self.green_mask, encoding="passthrough")
         depth_mask = self.bridge.imgmsg_to_cv2(intermediate, desired_encoding="32FC1")
@@ -222,9 +223,12 @@ class TurtleBot():
 
 
         cv2.imshow("window", self.display_image)
-        cv2.imshow("depth", image_resized)
+        """ cv2.imshow("depth resized", image_resized)
         cv2.imshow("depth masked", output)
-        cv2.imshow("green mask", self.green_mask)
+        cv2.imshow("green mask", self.green_mask) """
+        cv2.imshow("red mask", self.red_mask)
+        cv2.imshow("blue mask", self.blue_mask)
+        cv2.imshow("canny edges", self.edged)
         cv2.waitKey(3)
         
 
@@ -240,20 +244,39 @@ class TurtleBot():
         self.display_image = cv2.resize(image, (w/4, h/4))
         hsv_image = cv2.cvtColor(self.display_image, cv2.COLOR_BGR2HSV)
 
+        # colour slicing for the green box
         lower_hsv_green = np.array([40, 200, 20], dtype="uint8")
         upper_hsv_green = np.array([70, 255, 255], dtype="uint8")
 
+        # colour slicing for the fire hydrant
+        lower_hsv_red = np.array([0,255, 20], dtype="uint8")
+        upper_hsv_red = np.array([10,255,255], dtype="uint8")
+
+        # colour slicing for the mailbox
+        lower_hsv_blue = np.array([90,130,30], dtype="uint8")
+        upper_hsv_blue = np.array([120,150,40], dtype="uint8")
+
+        self.blue_mask = cv2.inRange(hsv_image, lower_hsv_blue, upper_hsv_blue)
         self.green_mask = cv2.inRange(hsv_image, lower_hsv_green, upper_hsv_green)
+        self.red_mask = cv2.inRange(hsv_image, lower_hsv_red, upper_hsv_red)
+        
 
         
         # Contour detection starts from the bottom of the image, so we rotate the image 90 degrees counter clockwise
         # To ensure that the first beacon detected is always the left most beacon.
-        rotated_mask = cv2.rotate(self.green_mask, cv2.ROTATE_90_COUNTERCLOCKWISE)
-        _, contours, hierarchy = cv2.findContours(rotated_mask,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
+        rotated_mask_green = cv2.rotate(self.green_mask, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        _, green_contours, green_hierarchy = cv2.findContours(rotated_mask_green,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
 
-        if contours and not self.found["green_box"] and not self.object_seen:
+        grey = cv2.cvtColor(hsv_image, cv2.COLOR_BGR2GRAY)
+        self.edged = cv2.Canny(grey, 30, 200) 
+        """ _, contours, hierarchy = cv2.findContours(hsv_image, cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
+
+        cv2.drawContours(hsv_image, contours, -1, (0,255,0), 3) """
+        
+    
+        """ if green_contours and not self.found["green_box"] and not self.object_seen:
             # self.cancel_pub.publish(GoalID())
-            self.object_seen = True
+            self.object_seen = True """
 
 
     def move_to_waypoint(self, wp):
