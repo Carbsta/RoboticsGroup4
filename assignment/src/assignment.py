@@ -16,12 +16,13 @@ from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 from math import cos, sin, pi, isnan, sqrt
 
 class Map:
-    def __init__(self, (x, y), (width, height), resolution):
+    def __init__(self, bounds, (x, y), (width, height), resolution):
         self.waypoints = []
         self.grid = OccupancyGrid()
         self.robot_pos = 0
         self.occupied_thresh = 0.65
         self.free_thresh = 0.196
+        self.bounds = bounds
         self.initGrid((x, y), (width, height), resolution)
 
     def initGrid(self, (x, y), (width, height), resolution):
@@ -100,6 +101,14 @@ class Map:
         else:
             return wp
 
+    def in_inner_bounds(self, point):
+        in_x = (point[0] > self.bounds[0][0] and point[0] > self.bounds[1][0] 
+            and point[0] < self.bounds[2][0] and point[0] < self.bounds[3][0])
+        in_y = (point[1] > self.bounds[0][1] and point[0] < self.bounds[1][1] 
+            and point[1] > self.bounds[2][1] and point[0] < self.bounds[3][1])
+        return in_x and in_y
+
+
     def to_index(self, gx, gy):
         return gy * self.grid.info.width + gx
 
@@ -139,7 +148,9 @@ class TurtleBot():
     def __init__(self):
         rospy.init_node('turtlebot', anonymous=True)
         self.rate = rospy.Rate(10)
-        self.map = Map( (-10, -10 ), (20,20), 1)
+        bounds = [(-1.38, 4.46), (-1.43, -4.17), (6.50,4.26), (6.27, -4.27)]
+        self.map = Map( bounds, (-10, -10 ), (20,20), 1)
+        self.initialise_waypoints()
         self.ranges = [0] * 360
         self.pose = Pose(0,0,0)
         self.acml_pose = PoseWithCovarianceStamped()
@@ -351,6 +362,7 @@ class TurtleBot():
 
     def frontier_exploration(self):
         frontier = self.calculate_frontier()
+        print "frontier: \n{}".format(frontier)
         if not frontier:
             return True
         prio_cell = self.highest_priority(frontier)
@@ -358,6 +370,7 @@ class TurtleBot():
         if world_point == None:
             print "World point out of map"
             raise IndexError
+        print "goal {} {}".format(world_point[0], world_point[1])
         goal = Point(world_point[0], world_point[1], 0)
         self.move_to_waypoint(goal)
         return False
@@ -365,10 +378,12 @@ class TurtleBot():
     def calculate_frontier(self):
         frontier = []
         for x in range(self.map.grid.info.width * self.map.grid.info.height):
-            if self.map.grid.data[x] != -1 and self.map.grid.data[x] < 0.5:
-                borders = self.get_borders(x)
-                if -1 in borders:
-                    frontier.append(x)
+            world_point = self.map.to_world(self.map.from_index(x))
+            if self.map.in_inner_bounds(world_point):
+                if self.map.grid.data[x] != -1 and self.map.grid.data[x] < 0.5:
+                    borders = self.get_borders(x)
+                    if -1 in borders:
+                        frontier.append(x)
         return frontier
 
     def get_borders(self, x):
