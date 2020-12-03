@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+from __future__ import division
 import rospy
 
 import numpy as np
@@ -12,40 +13,36 @@ from nav_msgs.msg import Odometry, OccupancyGrid
 from sensor_msgs.msg import LaserScan, Image
 from actionlib_msgs.msg import *
 from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
-from math import cos, sin, pi, isnan
+from math import cos, sin, pi, isnan, sqrt
 
 class Map:
-    def __init__(self, (x, y), (size_x, size_y), resolution):
-        self.origin = (x, y)
-        self.size = (size_x, size_y)
-        self.resolution = resolution
+    def __init__(self, (x, y), (width, height), resolution):
         self.waypoints = []
         self.grid = OccupancyGrid()
         self.robot_pos = 0
         self.occupied_thresh = 0.65
         self.free_thresh = 0.196
+        self.initGrid((x, y), (width, height), resolution)
 
-        self.initGrid()
-
-    def initGrid(self):
+    def initGrid(self, (x, y), (width, height), resolution):
         self.grid.header.seq = 1
         self.grid.header.frame_id = "/map"
-        self.grid.info.resolution = self.resolution
-        self.grid.info.width = self.size[0]
-        self.grid.info.height = self.size[1]
-        self.grid.info.origin.position.x = self.origin[0]
-        self.grid.info.origin.position.y = self.origin[1]
+        self.grid.info.resolution = resolution
+        self.grid.info.width = width
+        self.grid.info.height = height
+        self.grid.info.origin.position.x = x
+        self.grid.info.origin.position.y = y
         self.grid.info.origin.position.z = 0
         self.grid.info.origin.orientation.x = 0
         self.grid.info.origin.orientation.y = 0
         self.grid.info.origin.orientation.z = 0
         self.grid.info.origin.orientation.w = 1
-        self.grid.data = [-1] * (self.size[0] * self.size[1])
+        self.grid.data = [-1] * (width * height)
     
-    def updateMap(self, angle_cones, max_range, robot_pose):
+    """ def updateMap(self, angle_cones, max_range, robot_pose):
         # update robot position
         robot_grid_pose = self.to_grid((robot_pose.x, robot.pose.y))
-        self.robot_pos = self.to_index(robot_grid_pose[0], robot_grid_pose[1], self.size[0])
+        self.robot_pos = self.to_index(robot_grid_pose[0], robot_grid_pose[1], self.grid.info.width)
 
         # fill occupancy grid
         for i in range(len(angle_cones)):
@@ -62,19 +59,20 @@ class Map:
                     angle_cones[i]
                 ))
                 if gp != None:
-                    grid_index = self.to_index(gp[0], gp[1], self.size[0])
+                    grid_index = self.to_index(gp[0], gp[1], self.grid.info.width)
                     if angle_cones[i] < max_range:
                         self.grid.data[grid_index] = 100 #occupied by anything
                     else:
-                        self.grid.data[grid_index] = 10
-                        
+                        self.grid.data[grid_index] = 10 """
+    def euclidean_distance(self, x, y):
+        return sqrt(sum([(a - b) ** 2 for a, b in zip(x, y)]))                    
 
     def updateOcGrid(self, world_point):
         gp = self.to_grid(world_point)
         if gp == None:
             print "Out of Bounds"
         else:
-            grid_index = self.to_index(gp[0], gp[1], self.size[0])
+            grid_index = self.to_index(gp[0], gp[1])
             self.robot_pos = grid_index
             self.grid.data[grid_index] = 1
     
@@ -83,32 +81,37 @@ class Map:
     
     def to_grid(self, point):
         gp = ( 
-                int( (point[0] - self.origin[0]) / self.resolution),
-                int( ( point[1] - self.origin[1] ) / self.resolution)
+                int( (point[0] - self.grid.info.origin.position.x) / self.grid.info.resolution),
+                int( ( point[1] - self.grid.info.origin.position.y ) / self.grid.info.resolution)
             )
-        if gp[0] >= self.size[0] or gp[1] >= self.size[1] or gp[0] < 0 or gp[1] < 0:
+        if gp[0] >= self.grid.info.width or gp[1] >= self.grid.info.height or gp[0] < 0 or gp[1] < 0:
             return None
         else:
             return gp
 
     def to_world(self, point):
         wp = (
-                ( ( self.origin[0] + (point[0] * self.resolution)) + self.resolution / 2.0),
-                ( ( self.origin[1] + (point[1] * self.resolution)) + self.resolution / 2.0)
+                ( ( self.grid.info.origin.position.x + (point[0] * self.grid.info.resolution)) + self.grid.info.resolution / 2.0),
+                ( ( self.grid.info.origin.position.y + (point[1] * self.grid.info.resolution)) + self.grid.info.resolution / 2.0)
             )
 
-        if point[0] >= self.size[0] or point[0] < 0 or point[1] >= self.size[1] or point[1] < 0:
+        if point[0] >= self.grid.info.width or point[0] < 0 or point[1] >= self.grid.info.height or point[1] < 0:
             return None
         else:
             return wp
 
-    def to_index(self, gx, gy, size_x):
-        return gy * size_x + gx
+    def to_index(self, gx, gy):
+        return gy * self.grid.info.width + gx
+
+    def from_index(self, index):
+        y = int(index / self.grid.info.width)
+        x = index - (y * self.grid.info.width)
+        return (x,y)
 
     def display(self):
         row = []
-        for x in range(self.size[0] * self.size[1], 0, -1):
-            if x % self.size[0] == 0:
+        for x in range(self.grid.info.width * self.grid.info.height, 0, -1):
+            if x % self.grid.info.width == 0:
                 print("".join(row))
                 row = []
             item = self.grid.data[x-1]
@@ -139,14 +142,15 @@ class TurtleBot():
         self.map = Map( (-10, -10 ), (20,20), 1)
         self.ranges = [0] * 360
         self.pose = Pose(0,0,0)
+        self.acml_pose = PoseWithCovarianceStamped()
         self.found = {"fire_hydrant":False, "green_box":False, "mail_box":False, "number_5":False}
         self.goal_estimates = {"fire_hydrant":None, "green_box":None, "mail_box":None, "number_5":None}
         self.object_seen = False
         self.exploring = True
         self.green_mask = None
         self.display_image = None
-        # self.amcl_sub = rospy.Subscriber('/amcl_pose',PoseWithCovarianceStamped,self.amcl_callback)
-        self.amcl_sub = rospy.Subscriber('/odom',Odometry,self.amcl_callback)
+        self.amcl_sub = rospy.Subscriber('/amcl_pose',PoseWithCovarianceStamped,self.amcl_callback)
+        # self.amcl_sub = rospy.Subscriber('/odom',Odometry,self.amcl_callback)
         #self.laser_sub = rospy.Subscriber('/scan', LaserScan,self.scan_callback)
         #self.image_sub = rospy.Subscriber('/camera/rgb/image_raw', Image, self.rgb_callback)
         #self.depth_sub = rospy.Subscriber('/camera/depth/image_raw', Image, self.depth_callback)
@@ -180,6 +184,7 @@ class TurtleBot():
         self.map.add_waypoint(Point(4, 4, 0)) # closed room B
         self.map.add_waypoint(Point(6, 3, 0)) # far corridor A
         self.map.add_waypoint(Point(5,-3,0)) # far corridor B
+        pass
 
     def entry_function(self):
         self.initialisePose()
@@ -188,12 +193,16 @@ class TurtleBot():
     
     def robot_movement(self):
         while not rospy.is_shutdown() and not all(x==True for x in self.found.values()):
-            for wp in self.map.waypoints:
+            self.rate.sleep()
+            if self.frontier_exploration():
+                print "switching from frontier exploration to waypoint roaming"
+                for wp in self.map.waypoints:
 
-                if self.object_seen:
-                    self.beacon_to_object()
+                    if self.object_seen:
+                        self.beacon_to_object()
 
-                self.move_to_waypoint(wp)
+                    self.move_to_waypoint(wp)
+        pass
 
     def beacon_to_object(self):
         for key,value in self.found.iteritems():
@@ -286,7 +295,6 @@ class TurtleBot():
             # self.cancel_pub.publish(GoalID())
             self.object_seen = True
 
-
     def move_to_waypoint(self, wp):
         """Sends commands to move the robot to a desired goal location.
         
@@ -306,10 +314,11 @@ class TurtleBot():
         goal.target_pose.header.stamp = rospy.Time.now()
 
         goal.target_pose.pose.position = wp
-        goal.target_pose.pose.orientation.x = 0.0
+        """ goal.target_pose.pose.orientation.x = 0.0
         goal.target_pose.pose.orientation.y = 0.0
         goal.target_pose.pose.orientation.z = 0.0
-        goal.target_pose.pose.orientation.w = 1.0
+        goal.target_pose.pose.orientation.w = 1.0 """
+        goal.target_pose.pose.orientation = self.acml_pose.pose.pose.orientation
 
         rospy.loginfo("Sending goal location ...")
         self.ac.send_goal(goal)
@@ -324,6 +333,7 @@ class TurtleBot():
             return False
 
     def amcl_callback(self, msg):
+        self.acml_pose = msg
         # Get (x, y, theta) specification from odometry topic
         quarternion = [msg.pose.pose.orientation.x,msg.pose.pose.orientation.y,\
                     msg.pose.pose.orientation.z, msg.pose.pose.orientation.w]
@@ -336,19 +346,58 @@ class TurtleBot():
         self.pose.y = msg.pose.pose.position.y
 
     def map_callback(self, msg):
-        print('=' * 100)
-        print(msg.info)
-        print(len(msg.data))
-        print('=' * 100)
+        self.map.grid = msg
         return
 
     def frontier_exploration(self):
-        
-        pass
+        frontier = self.calculate_frontier()
+        if not frontier:
+            return True
+        prio_cell = self.highest_priority(frontier)
+        world_point = self.map.to_world(self.map.from_index(prio_cell))
+        if world_point == None:
+            print "World point out of map"
+            raise IndexError
+        goal = Point(world_point[0], world_point[1], 0)
+        self.move_to_waypoint(goal)
+        return False
 
-    def sense(self):
-        pass
+    def calculate_frontier(self):
+        frontier = []
+        for x in range(self.map.grid.info.width * self.map.grid.info.height):
+            if self.map.grid.data[x] != -1 and self.map.grid.data[x] < 0.5:
+                borders = self.get_borders(x)
+                if -1 in borders:
+                    frontier.append(x)
+        return frontier
 
+    def get_borders(self, x):
+        borders = []
+        if x:
+            borders.append(self.map.grid.data[x-1])
+        if x >= self.map.grid.info.width:
+            borders.append(self.map.grid.data[x-self.map.grid.info.width])
+        if x < (self.map.grid.info.width * self.map.grid.info.height) - self.map.grid.info.width:
+            borders.append(self.map.grid.data[x+self.map.grid.info.width])
+        if x != (self.map.grid.info.width * self.map.grid.info.height) - 1:
+            borders.append(self.map.grid.data[x+1])
+
+        return borders
+
+
+    def highest_priority(self, frontier):
+        prio_cell = frontier[0]
+        for cell in frontier:
+            a_cell = len(self.get_borders(cell))
+            world_point = self.map.to_world(self.map.from_index(cell))
+            if world_point == None:
+                print "World point out of map"
+                raise IndexError
+            d_cell = self.map.euclidean_distance((self.pose.x, self.pose.y), world_point)
+            p_cell = a_cell / d_cell
+            if p_cell >= prio_cell:
+                prio_cell = cell
+        return prio_cell
 
 if __name__ == '__main__':
     try:
