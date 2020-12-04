@@ -41,31 +41,6 @@ class Map:
         self.grid.info.origin.orientation.w = 1
         self.grid.data = [-1] * (width * height)
     
-    """ def updateMap(self, angle_cones, max_range, robot_pose):
-        # update robot position
-        robot_grid_pose = self.to_grid((robot_pose.x, robot.pose.y))
-        self.robot_pos = self.to_index(robot_grid_pose[0], robot_grid_pose[1], self.grid.info.width)
-
-        # fill occupancy grid
-        for i in range(len(angle_cones)):
-            if angle_cones[i] != float("inf"):
-                px_world = angle_cones[i] * cos((i * 20 + 10) * pi / 180) + robot_pose.x
-                py_world = angle_cones[i] * sin((i * 20 + 10) * pi / 180) + robot_pose.y
-
-                gp = self.to_grid((px_world, py_world))
-                print('robot_pose: {}, robot_grid: {}, pworld: {}, gp: {}, distance: {}'.format(
-                    (robot_pose.x, robot_pose.y),
-                    robot_grid_pose,
-                    (px_world, py_world),
-                    gp,
-                    angle_cones[i]
-                ))
-                if gp != None:
-                    grid_index = self.to_index(gp[0], gp[1], self.grid.info.width)
-                    if angle_cones[i] < max_range:
-                        self.grid.data[grid_index] = 100 #occupied by anything
-                    else:
-                        self.grid.data[grid_index] = 10 """
     def euclidean_distance(self, x, y):
         return sqrt(sum([(a - b) ** 2 for a, b in zip(x, y)]))                    
 
@@ -118,24 +93,6 @@ class Map:
         x = index - (y * self.grid.info.width)
         return (x,y)
 
-    def display(self):
-        row = []
-        for x in range(self.grid.info.width * self.grid.info.height, 0, -1):
-            if x % self.grid.info.width == 0:
-                print("".join(row))
-                row = []
-            item = self.grid.data[x-1]
-            if x-1 == self.robot_pos:
-                row.insert(0,"@@")
-            else:
-                if item == -1:
-                    row.insert(0,"▓▓")
-                else:
-                    if item <= 90:
-                        row.insert(0,"░░")
-                    else:
-                        row.insert(0,"██")
-
 class Pose:
     """Simple Pose Object
 
@@ -160,13 +117,14 @@ class TurtleBot():
         self.goal_estimates = {"fire_hydrant":None, "green_box":None, "mail_box":None, "number_5":None}
         self.object_seen = False
         self.exploring = True
+        self.initalisation = True
         self.green_mask = np.zeros((270, 480))
         self.red_mask = np.zeros((270, 480))
         self.blue_mask = np.zeros((270, 480))
         self.display_image = np.zeros((270, 480))
         self.amcl_sub = rospy.Subscriber('/amcl_pose',PoseWithCovarianceStamped,self.amcl_callback)
         self.odom_sub = rospy.Subscriber('/odom',Odometry,self.amcl_callback)
-        self.laser_sub = rospy.Subscriber('/scan', LaserScan,self.scan_callback)
+        #self.laser_sub = rospy.Subscriber('/scan', LaserScan,self.scan_callback)
         self.image_sub = rospy.Subscriber('/camera/rgb/image_raw', Image, self.rgb_callback)
         self.depth_sub = rospy.Subscriber('/camera/depth/image_raw', Image, self.depth_callback)
         self.cancel_pub = rospy.Publisher('/move_base/cancel', GoalID, queue_size=1)
@@ -187,13 +145,14 @@ class TurtleBot():
         pass
 
     def entry_function(self):
-        self.initialisePose()
+        # self.initialisePose()
         # self.initialise_waypoints()
         self.robot_movement()
     
     def robot_movement(self):
         while not rospy.is_shutdown():
             self.move_to_waypoint(Point(0,0,0))
+            self.initalisation = False
             while not all(x==True for x in self.found.values()):
                 self.rate.sleep()
                 if self.frontier_exploration():
@@ -221,58 +180,69 @@ class TurtleBot():
         self.exploring = True
 
     def depth_callback(self, msg):
-        depth_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough")
-        #processing_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="16UC1")
-        
-        
+        if not self.initalisation:
+            depth_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough")
+            #processing_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="16UC1")
+            
+            
 
-        (h, w) = depth_image.shape[:2]
+            (h, w) = depth_image.shape[:2]
 
-        image_resized = cv2.resize(depth_image, (w/4, h/4))
+            image_resized = cv2.resize(depth_image, (int(w/4), int(h/4)))
 
-        output = np.zeros( (h/4, w/4) )
+            output = np.zeros( (int(h/4), int(w/4)) )
 
-        intermediate = self.bridge.cv2_to_imgmsg(self.green_mask, encoding="passthrough")
-        depth_mask = self.bridge.imgmsg_to_cv2(intermediate, desired_encoding="32FC1")
+            red_intermediate = self.bridge.cv2_to_imgmsg(self.red_mask, encoding="passthrough")
+            red_depth_mask = self.bridge.imgmsg_to_cv2(red_intermediate, desired_encoding="32FC1")
+            green_intermediate = self.bridge.cv2_to_imgmsg(self.green_mask, encoding="passthrough")
+            green_depth_mask = self.bridge.imgmsg_to_cv2(green_intermediate, desired_encoding="32FC1")
+            blue_intermediate = self.bridge.cv2_to_imgmsg(self.blue_mask, encoding="passthrough")
+            blue_depth_mask = self.bridge.imgmsg_to_cv2(blue_intermediate, desired_encoding="32FC1")
+            
 
-        if self.object_seen:
-            output = cv2.bitwise_and(image_resized, depth_mask)
-        
-        M = cv2.moments(output)
+            if self.object_seen:
+                green_depth_output = cv2.bitwise_and(image_resized, green_depth_mask)
+            
+            G_M = cv2.moments(green_depth_output)
 
-        if M['m00'] > 0:
-            cX = int(M["m10"] / M["m00"])
-            cY = int(M["m01"] / M["m00"])
-            cv2.circle(self.display_image,(cX,cY), 5, (0,0,255), -1)
-            if self.object_seen and self.exploring and not self.found["green_box"]:
-                
-                err = cX- w/8
-                proportional_z = -float(err) / 100
-                depth = image_resized[cY][cX]
-                print "x,y,theta: {},{},{}".format(self.pose.x,self.pose.y,self.pose.theta)
-                print "proportional_z: {}".format(proportional_z)
-                print "cX {} cY {}".format(cX,cY)
-                print "depth {}".format(depth)
-                
-                if not isnan(depth):
+            cancel = False
+
+            if G_M['m00'] > 0:
+                cX = int(G_M["m10"] / G_M["m00"])
+                cY = int(G_M["m01"] / G_M["m00"])
+                cv2.circle(self.display_image,(cX,cY), 5, (0,0,255), -1)
+                if self.object_seen and self.exploring and not self.found["green_box"]:
                     
-                    x = self.pose.x + (depth * sin(self.pose.theta + proportional_z))
-                    y = self.pose.y + (depth * cos(self.pose.theta + proportional_z))
-                    self.goal_estimates["green_box"] = Point(x, y, 0)
-                    print "current location {}, {}, theta: {}".format(self.pose.x, self.pose.y, self.pose.theta)
-                    print "estimated location {} , {}, heading: {}".format(x, y, self.pose.theta + proportional_z)
-                    self.exploring = False
-                    self.cancel_pub.publish(GoalID())
+                    err = cX- w/8
+                    proportional_z = -float(err) / 100
+                    depth = image_resized[cY][cX]
+                    print "x,y,theta: {},{},{}".format(self.pose.x,self.pose.y,self.pose.theta)
+                    print "proportional_z: {}".format(proportional_z)
+                    print "cX {} cY {}".format(cX,cY)
+                    print "depth {}".format(depth)
+                    
+                    if not isnan(depth):
+                        
+                        x = self.pose.x + (depth * sin(self.pose.theta + proportional_z))
+                        y = self.pose.y + (depth * cos(self.pose.theta + proportional_z))
+                        self.goal_estimates["green_box"] = Point(x, y, 0)
+                        print "current location {}, {}, theta: {}".format(self.pose.x, self.pose.y, self.pose.theta)
+                        print "estimated location {} , {}, heading: {}".format(x, y, self.pose.theta + proportional_z)
+                        self.exploring = False
+                        cancel = True
+            
+            if cancel:
+                self.cancel_pub.publish(GoalID())
 
 
-        cv2.imshow("window", self.display_image)
-        """ cv2.imshow("depth resized", image_resized)
-        cv2.imshow("depth masked", output)
-        cv2.imshow("green mask", self.green_mask) """
-        cv2.imshow("red mask", self.red_mask)
-        cv2.imshow("blue mask", self.blue_mask)
-        cv2.imshow("canny edges", self.edged)
-        cv2.waitKey(3)
+            cv2.imshow("window", self.display_image)
+            cv2.imshow("depth resized", image_resized)
+            cv2.imshow("green depth masked", green_depth_output)
+            cv2.imshow("green mask", self.green_mask)
+            cv2.imshow("red mask", self.red_mask)
+            cv2.imshow("blue mask", self.blue_mask)
+            cv2.imshow("canny edges", self.edged)
+            cv2.waitKey(3)
         
 
     def rgb_callback(self, msg):
@@ -282,44 +252,50 @@ class TurtleBot():
             nothing
         arguments:
             msg: scan data used to populate list of ranges from /camera/rgb/image_raw topic"""
-        image = self.bridge.imgmsg_to_cv2(msg,desired_encoding='bgr8')
-        (h, w) = image.shape[:2]
-        self.display_image = cv2.resize(image, (w/4, h/4))
-        hsv_image = cv2.cvtColor(self.display_image, cv2.COLOR_BGR2HSV)
+        if not self.initalisation:
+            image = self.bridge.imgmsg_to_cv2(msg,desired_encoding='bgr8')
+            (h, w) = image.shape[:2]
+            self.display_image = cv2.resize(image, (int(w/4), int(h/4)))
+            hsv_image = cv2.cvtColor(self.display_image, cv2.COLOR_BGR2HSV)
 
-        # colour slicing for the green box
-        lower_hsv_green = np.array([40, 200, 20], dtype="uint8")
-        upper_hsv_green = np.array([70, 255, 255], dtype="uint8")
+            # colour slicing for the green box
+            lower_hsv_green = np.array([40, 200, 20], dtype="uint8")
+            upper_hsv_green = np.array([70, 255, 255], dtype="uint8")
 
-        # colour slicing for the fire hydrant
-        lower_hsv_red = np.array([0,255, 20], dtype="uint8")
-        upper_hsv_red = np.array([10,255,255], dtype="uint8")
+            # colour slicing for the fire hydrant
+            lower_hsv_red = np.array([0,255, 20], dtype="uint8")
+            upper_hsv_red = np.array([10,255,255], dtype="uint8")
 
-        # colour slicing for the mailbox
-        lower_hsv_blue = np.array([90,130,30], dtype="uint8")
-        upper_hsv_blue = np.array([120,150,40], dtype="uint8")
+            # colour slicing for the mailbox
+            lower_hsv_blue = np.array([90,130,30], dtype="uint8")
+            upper_hsv_blue = np.array([120,150,40], dtype="uint8")
 
-        self.blue_mask = cv2.inRange(hsv_image, lower_hsv_blue, upper_hsv_blue)
-        self.green_mask = cv2.inRange(hsv_image, lower_hsv_green, upper_hsv_green)
-        self.red_mask = cv2.inRange(hsv_image, lower_hsv_red, upper_hsv_red)
-        
+            self.blue_mask = cv2.inRange(hsv_image, lower_hsv_blue, upper_hsv_blue)
+            self.green_mask = cv2.inRange(hsv_image, lower_hsv_green, upper_hsv_green)
+            self.red_mask = cv2.inRange(hsv_image, lower_hsv_red, upper_hsv_red)
+            
 
-        
-        # Contour detection starts from the bottom of the image, so we rotate the image 90 degrees counter clockwise
-        # To ensure that the first beacon detected is always the left most beacon.
-        rotated_mask_green = cv2.rotate(self.green_mask, cv2.ROTATE_90_COUNTERCLOCKWISE)
-        _, green_contours, green_hierarchy = cv2.findContours(rotated_mask_green,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
+            
+            # Contour detection starts from the bottom of the image, so we rotate the image 90 degrees counter clockwise
+            # To ensure that the first beacon detected is always the left most beacon.
+            rotated_mask_red = cv2.rotate(self.red_mask, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            _, red_contours, red_hierarchy = cv2.findContours(rotated_mask_red,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
 
-        grey = cv2.cvtColor(hsv_image, cv2.COLOR_BGR2GRAY)
-        self.edged = cv2.Canny(grey, 30, 200) 
-        """ _, contours, hierarchy = cv2.findContours(hsv_image, cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
+            rotated_mask_green = cv2.rotate(self.green_mask, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            _, green_contours, green_hierarchy = cv2.findContours(rotated_mask_green,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
 
-        cv2.drawContours(hsv_image, contours, -1, (0,255,0), 3) """
-        
-    
-        """ if green_contours and not self.found["green_box"] and not self.object_seen:
-            # self.cancel_pub.publish(GoalID())
-            self.object_seen = True """
+            rotated_mask_blue = cv2.rotate(self.blue_mask, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            _, blue_contours, blue_hierarchy = cv2.findContours(rotated_mask_blue,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
+
+            grey = cv2.cvtColor(hsv_image, cv2.COLOR_BGR2GRAY)
+            self.edged = cv2.Canny(grey, 30, 200) 
+            """ _, contours, hierarchy = cv2.findContours(hsv_image, cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
+
+            cv2.drawContours(hsv_image, contours, -1, (0,255,0), 3) """
+            
+            if not self.object_seen:
+                if (green_contours and not self.found["green_box"]) or (blue_contors and not self.found["mail_box"]) or (red_contours and not self.found["fire_hydrant"]):
+                    self.object_seen = True
 
     def move_to_waypoint(self, wp):
         """Sends commands to move the robot to a desired goal location.
