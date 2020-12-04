@@ -5,21 +5,19 @@
   <!-- <arg name="map_file" default="$(find assignment)/maps/train_env.yaml"/>>-->
   <arg name="configuration_basename" default="turtlebot3_lds_2d.lua"/>
   <arg name="open_rviz" default="true"/>
+  <arg name="move_forward_only" default="false"/>
 
   <!-- followbot -->
   <include file="$(find followbot)/launch/turtlebot3_training.launch">
     <arg name="model" value="$(arg model)"/>
   </include>
 
-  <!-- SLAM: -->
-  <include file="$(find turtlebot3_slam)/launch/turtlebot3_slam.launch">
-    <arg name="model" value="$(arg model)"/>
-    <arg name="configuration_basename" value="$(arg configuration_basename)"/>
-  </include>
-
-  <!-- Navigation -->
-<!-- <include file="$(find turtlebot3_navigation)/launch/turtlebot3_navigation.launch">    
-</include> -->
+  <!-- Navigation: -->
+ <include file="$(find assignment)/launch/assignment_navigation/assignment_navigation.launch">
+    <arg name="model" value="$(arg model)" />
+    <arg name="open_rviz" value="$(arg open_rviz)"/>
+    <arg name="move_forward_only" value="$(arg move_forward_only)" />
+ </include>
 
   <!-- rviz -->
   <!-- <group if="$(arg open_rviz)"> 

@@ -16,14 +16,15 @@ from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 from math import cos, sin, pi, isnan, sqrt
 
 class Map:
-    def __init__(self, bounds, (x, y), (width, height), resolution):
+    def __init__(self, bounds):
         self.waypoints = []
         self.grid = OccupancyGrid()
         self.robot_pos = 0
         self.occupied_thresh = 0.65
         self.free_thresh = 0.196
         self.bounds = bounds
-        self.initGrid((x, y), (width, height), resolution)
+        self.bad_points = []
+        # self.initGrid((x, y), (width, height), resolution)
 
     def initGrid(self, (x, y), (width, height), resolution):
         self.grid.header.seq = 1
@@ -149,11 +150,12 @@ class TurtleBot():
         rospy.init_node('turtlebot', anonymous=True)
         self.rate = rospy.Rate(10)
         bounds = [(-1.38, 4.46), (-1.43, -4.17), (6.50,4.26), (6.27, -4.27)]
-        self.map = Map( bounds, (-10, -10 ), (20,20), 1)
+        self.map = Map( bounds )
         self.initialise_waypoints()
         self.ranges = [0] * 360
         self.pose = Pose(0,0,0)
         self.acml_pose = PoseWithCovarianceStamped()
+        self.odom_pose = Odometry()
         self.found = {"fire_hydrant":False, "green_box":False, "mail_box":False, "number_5":False}
         self.goal_estimates = {"fire_hydrant":None, "green_box":None, "mail_box":None, "number_5":None}
         self.object_seen = False
@@ -161,29 +163,14 @@ class TurtleBot():
         self.green_mask = None
         self.display_image = None
         self.amcl_sub = rospy.Subscriber('/amcl_pose',PoseWithCovarianceStamped,self.amcl_callback)
-        # self.amcl_sub = rospy.Subscriber('/odom',Odometry,self.amcl_callback)
-        #self.laser_sub = rospy.Subscriber('/scan', LaserScan,self.scan_callback)
-        #self.image_sub = rospy.Subscriber('/camera/rgb/image_raw', Image, self.rgb_callback)
-        #self.depth_sub = rospy.Subscriber('/camera/depth/image_raw', Image, self.depth_callback)
-        #self.cancel_pub = rospy.Publisher('/move_base/cancel', GoalID, queue_size=1)
+        self.odom_sub = rospy.Subscriber('/odom',Odometry,self.amcl_callback)
+        self.laser_sub = rospy.Subscriber('/scan', LaserScan,self.scan_callback)
+        self.image_sub = rospy.Subscriber('/camera/rgb/image_raw', Image, self.rgb_callback)
+        self.depth_sub = rospy.Subscriber('/camera/depth/image_raw', Image, self.depth_callback)
+        self.cancel_pub = rospy.Publisher('/move_base/cancel', GoalID, queue_size=1)
         self.map_sub = rospy.Subscriber('/map', OccupancyGrid, self.map_callback)
         self.bridge = cv_bridge.CvBridge()
         self.ac = actionlib.SimpleActionClient("move_base",MoveBaseAction) # action client communicates with the move_base server
-        
-    def initialisePose(self):
-        posepub = rospy.Publisher("/initialpose",PoseWithCovarianceStamped, queue_size=1)
-        initialpose = PoseWithCovarianceStamped()
-        initialpose.header.frame_id = "map"
-        initialpose.header.stamp = rospy.Time.now()
-        initialpose.pose.pose.position.x = -1
-        initialpose.pose.pose.position.y = 1
-        initialpose.pose.pose.position.z = 0
-        initialpose.pose.pose.orientation.x = 0
-        initialpose.pose.pose.orientation.y = 0
-        initialpose.pose.pose.orientation.z = 0
-        initialpose.pose.pose.orientation.w = 1
-        initialpose.pose.covariance = [0] * 36
-        posepub.publish(initialpose)
 
     def initialise_waypoints(self):
         """creates waypoints for each room"""
@@ -203,17 +190,22 @@ class TurtleBot():
         self.robot_movement()
     
     def robot_movement(self):
-        while not rospy.is_shutdown() and not all(x==True for x in self.found.values()):
-            self.rate.sleep()
-            if self.frontier_exploration():
-                print "switching from frontier exploration to waypoint roaming"
-                for wp in self.map.waypoints:
+        while not rospy.is_shutdown():
+            self.move_to_waypoint(Point(0,0,0))
+            while not all(x==True for x in self.found.values()):
+                self.rate.sleep()
+                if self.frontier_exploration():
+                    print "switching from frontier exploration to waypoint roaming"
+                    for wp in self.map.waypoints:
 
-                    if self.object_seen:
+                        if self.object_seen:
+                            self.beacon_to_object()
+
+                        self.move_to_waypoint(wp)
+                if self.object_seen:
                         self.beacon_to_object()
-
-                    self.move_to_waypoint(wp)
-        pass
+            """ self.rate.sleep()
+            self.move_to_waypoint(Point(0,0,0)) """
 
     def beacon_to_object(self):
         for key,value in self.found.iteritems():
@@ -325,16 +317,16 @@ class TurtleBot():
         goal.target_pose.header.stamp = rospy.Time.now()
 
         goal.target_pose.pose.position = wp
-        """ goal.target_pose.pose.orientation.x = 0.0
+        goal.target_pose.pose.orientation.x = 0.0
         goal.target_pose.pose.orientation.y = 0.0
         goal.target_pose.pose.orientation.z = 0.0
-        goal.target_pose.pose.orientation.w = 1.0 """
-        goal.target_pose.pose.orientation = self.acml_pose.pose.pose.orientation
+        goal.target_pose.pose.orientation.w = 1.0
+        """ goal.target_pose.pose.orientation.w = self.odom_pose.pose.pose.orientation.w """
 
         rospy.loginfo("Sending goal location ...")
         self.ac.send_goal(goal)
 
-        self.ac.wait_for_result(rospy.Duration(60))
+        self.ac.wait_for_result(rospy.Duration(30))
 
         if(self.ac.get_state() == GoalStatus.SUCCEEDED):
             rospy.loginfo("You have reached the destination")
@@ -356,6 +348,20 @@ class TurtleBot():
         self.pose.x = msg.pose.pose.position.x
         self.pose.y = msg.pose.pose.position.y
 
+    def odom_callback(self, msg):
+        self.odom_pose = msg
+        # Get (x, y, theta) specification from odometry topic
+        quarternion = [msg.pose.pose.orientation.x,msg.pose.pose.orientation.y,\
+                    msg.pose.pose.orientation.z, msg.pose.pose.orientation.w]
+        (roll, pitch, yaw) = tf.transformations.euler_from_quaternion(quarternion)
+        # Make the range from 0 to +2pi to avoid negative value issues
+        if yaw < 0:
+            yaw += 2*pi
+        self.pose.theta = yaw
+        self.pose.x = msg.pose.pose.position.x
+        self.pose.y = msg.pose.pose.position.y
+
+
     def map_callback(self, msg):
         self.map.grid = msg
         return
@@ -373,14 +379,20 @@ class TurtleBot():
         print "goal {} {}".format(world_point[0], world_point[1])
         goal = Point(world_point[0], world_point[1], 0)
         self.move_to_waypoint(goal)
+        if(self.ac.get_state() != GoalStatus.SUCCEEDED):
+            self.map.bad_points.append(prio_cell)
+        else:
+            if len(self.map.bad_points) > 10:
+                self.map.bad_points = []
         return False
 
     def calculate_frontier(self):
         frontier = []
         for x in range(self.map.grid.info.width * self.map.grid.info.height):
-            world_point = self.map.to_world(self.map.from_index(x))
-            if self.map.in_inner_bounds(world_point):
-                if self.map.grid.data[x] != -1 and self.map.grid.data[x] < 0.5:
+            # world_point = self.map.to_world(self.map.from_index(x))
+            # if self.map.in_inner_bounds(world_point):
+            if not x in self.map.bad_points:
+                if self.map.grid.data[x] != -1 and self.map.grid.data[x] < 65:
                     borders = self.get_borders(x)
                     if -1 in borders:
                         frontier.append(x)
@@ -402,16 +414,18 @@ class TurtleBot():
 
     def highest_priority(self, frontier):
         prio_cell = frontier[0]
+        max_prio = -1
         for cell in frontier:
-            a_cell = len(self.get_borders(cell))
+            a_cell = self.get_borders(cell).count(-1)
             world_point = self.map.to_world(self.map.from_index(cell))
             if world_point == None:
                 print "World point out of map"
                 raise IndexError
-            d_cell = self.map.euclidean_distance((self.pose.x, self.pose.y), world_point)
+            d_cell = self.map.euclidean_distance((self.odom_pose.pose.pose.position.x, self.odom_pose.pose.pose.position.y), world_point)
             p_cell = a_cell / d_cell
-            if p_cell >= prio_cell:
+            if p_cell >= max_prio:
                 prio_cell = cell
+                max_prio = p_cell
         return prio_cell
 
 if __name__ == '__main__':
