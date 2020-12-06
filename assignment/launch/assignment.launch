@@ -6,6 +6,9 @@
   <arg name="configuration_basename" default="turtlebot3_lds_2d.lua"/>
   <arg name="open_rviz" default="true"/>
   <arg name="move_forward_only" default="false"/>
+  <arg name="rgb_topic"         default="camera/rgb/image_raw"/>
+  <arg name="depth_topic"       default="camera/depth/image_raw"/>
+  <arg name="camera_info_topic" default="camera/rgb/camera_info"/>
 
   <!-- followbot -->
   <include file="$(find followbot)/launch/turtlebot3_training.launch">
@@ -19,10 +22,7 @@
     <arg name="move_forward_only" value="$(arg move_forward_only)" />
  </include>
 
-  <!-- rviz -->
-  <!-- <group if="$(arg open_rviz)"> 
-    <node pkg="rviz" type="rviz" name="rviz" required="true"
-          args="-d $(find assignment)/rviz/assignment.rviz"/>
-  </group> -->
-  <!-- <node pkg="assignment" type="assignment.py" name="assignment" output="screen"/> -->
+ <!-- Find Object -->
+ <include file="$(find assignment)/launch/find-object.launch" />
+	
 </launch>
