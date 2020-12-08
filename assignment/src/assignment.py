@@ -19,14 +19,14 @@ from math import cos, sin, pi, isnan, sqrt
 """
 TODO:
 
-Variable to control time before navigation goals fail
+--Variable to control time before navigation goals fail--
 New approaches for handling getting stuck during frontier exploration
 - decide on condition to fall back to waypoint navigation
 Green object - use image slicing as before, but get the object's 2d height, width, shear etc
 and transform to map space with tf.
 Mess with planner settings
 --Re-add goal cancelling--
-Change arrival at goal object success condition, robot <= 1m from goal.
+--Change arrival at goal object success condition, robot <= 1m from goal.--
 Refactor and documentation
 """
 
@@ -35,8 +35,6 @@ class Map:
         self.waypoints = []
         self.grid = OccupancyGrid()
         self.robot_pos = 0
-        self.occupied_thresh = 0.65
-        self.free_thresh = 0.196
         self.bounds = bounds
         self.bad_points = []
         self.map_sub = rospy.Subscriber('/map', OccupancyGrid, self.map_callback)
@@ -105,6 +103,7 @@ class TurtleBot():
         self.listner = tf.TransformListener()
         self.cancel_pub = rospy.Publisher('/move_base/cancel', GoalID, queue_size=1)
         self.object_sub = rospy.Subscriber('/objectsStamped', ObjectsStamped, self.object_callback)
+        self.exploring = False
         
         self.bridge = cv_bridge.CvBridge()
         self.ac = actionlib.SimpleActionClient("move_base",MoveBaseAction) # action client communicates with the move_base server
@@ -145,9 +144,24 @@ class TurtleBot():
     def beacon_to_object(self):
         for key,value in self.found.iteritems():
             if self.found[key] == False and self.goal_estimates[key] != None:
-                print "moving to {} at {}".format(key, self.goal_estimates[key])
-                self.move_to_waypoint(self.goal_estimates[key])
-                if(self.map.euclidean_distance((self.odom_pose.pose.pose.position.x, self.odom_pose.pose.pose.position.y), (self.goal_estimates[key].x, self.goal_estimates[key].y)) <= 1):
+                # distance to target waypoint (object)
+                distance = self.map.euclidean_distance(
+                    (self.odom_pose.pose.pose.position.x, self.odom_pose.pose.pose.position.y),
+                    (self.goal_estimates[key].x, self.goal_estimates[key].y)
+                )
+                print "moving to {} at x: {}, y: {}, from robot_x: {}, robot_y: {}".format(
+                    key, self.goal_estimates[key].x, self.goal_estimates[key].y,
+                    self.odom_pose.pose.pose.position.x, self.odom_pose.pose.pose.position.y
+                )
+                print("euclidean distance to object (from robot): {}m".format(distance))
+                self.move_to_waypoint(self.goal_estimates[key], True)
+                # distance after arrived at target waypoint (object)
+                distance = self.map.euclidean_distance(
+                    (self.odom_pose.pose.pose.position.x, self.odom_pose.pose.pose.position.y),
+                    (self.goal_estimates[key].x, self.goal_estimates[key].y)
+                )
+                print("distance to object: {}".format(distance))
+                if(distance <= 1.5):
                     print "I have found {}!".format(key)
                     self.found[key] = True
                 else:
@@ -176,15 +190,13 @@ class TurtleBot():
 						trans[0], trans[1], trans[2],
 						rot[0], rot[1], rot[2], rot[3]) """
 
-    def move_to_waypoint(self, wp):
+    def move_to_waypoint(self, wp, to_object = False):
         """Sends commands to move the robot to a desired goal location.
         
         arguments:
             wp: Point object that represents the goal location.
         returns:
             Boolean: True if destination is reached, False if 120 seconds pass without reaching the destination."""
-
-        
 
         while(not self.ac.wait_for_server(rospy.Duration.from_sec(5.0))):
               rospy.loginfo("Waiting for the move_base action server to come up")
@@ -204,7 +216,9 @@ class TurtleBot():
         rospy.loginfo("Sending goal location ...")
         self.ac.send_goal(goal)
 
-        self.ac.wait_for_result(rospy.Duration(30))
+        duration = 60 if to_object else 50
+
+        self.ac.wait_for_result(rospy.Duration(duration))
 
         if(self.ac.get_state() == GoalStatus.SUCCEEDED):
             rospy.loginfo("You have reached the destination")
