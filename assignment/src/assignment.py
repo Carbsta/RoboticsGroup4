@@ -31,15 +31,15 @@ Refactor and documentation
 """
 
 class Map:
-    def __init__(self, bounds):
+    def __init__(self):
         self.waypoints = []
         self.grid = OccupancyGrid()
         self.robot_pos = 0
         self.occupied_thresh = 0.65
         self.free_thresh = 0.196
-        self.bounds = bounds
+        #self.bounds = bounds
         self.bad_points = []
-        self.map_sub = rospy.Subscriber('/map', OccupancyGrid, self.map_callback)
+        self.map_sub = rospy.Subscriber('/slam_map', OccupancyGrid, self.map_callback)
 
     def map_callback(self, msg):
         self.grid = msg
@@ -71,12 +71,12 @@ class Map:
         else:
             return wp
 
-    def in_inner_bounds(self, point):
+    """ def in_inner_bounds(self, point):
         in_x = (point[0] > self.bounds[0][0] and point[0] > self.bounds[1][0] 
             and point[0] < self.bounds[2][0] and point[0] < self.bounds[3][0])
         in_y = (point[1] > self.bounds[0][1] and point[0] < self.bounds[1][1] 
             and point[1] > self.bounds[2][1] and point[0] < self.bounds[3][1])
-        return in_x and in_y
+        return in_x and in_y """
 
 
     def to_index(self, gx, gy):
@@ -87,14 +87,23 @@ class Map:
         x = index - (y * self.grid.info.width)
         return (x,y)
 
+""" class Pose():
+    def __init__(self, position, orientation):
+        self.position = position
+        self.orientation = orientation """
+
 class TurtleBot():
     def __init__(self):
         rospy.init_node('turtlebot', anonymous=True)
         self.rate = rospy.Rate(10)
-        bounds = [(-1.38, 4.46), (-1.43, -4.17), (6.50,4.26), (6.27, -4.27)]
-        self.map = Map( bounds )
+        #bounds = [(-1.38, 4.46), (-1.43, -4.17), (6.50,4.26), (6.27, -4.27)]
+        self.frontier_exp = False
+        self.map = Map()
         self.initialise_waypoints()
         self.odom_pose = Odometry()
+        self.amcl_pose = PoseWithCovarianceStamped()
+        self.stopping_distance = 0.2
+        self.current_goal = (0,0)
 
         self.found = {"fire_hydrant":False, "green_box":False, "mail_box":False, "number_5":False}
         self.goal_estimates = {"fire_hydrant":None, "green_box":None, "mail_box":None, "number_5":None}
@@ -102,6 +111,7 @@ class TurtleBot():
         self.object_seen = False
 
         self.odom_sub = rospy.Subscriber('/odom',Odometry,self.odom_callback)
+        self.amcl_sub = rospy.Subscriber('/amcl_pose', PoseWithCovarianceStamped, self.amcl_callback)
         self.listner = tf.TransformListener()
         self.cancel_pub = rospy.Publisher('/move_base/cancel', GoalID, queue_size=1)
         self.object_sub = rospy.Subscriber('/objectsStamped', ObjectsStamped, self.object_callback)
@@ -111,7 +121,7 @@ class TurtleBot():
 
     def initialise_waypoints(self):
         """creates waypoints for each room"""
-        self.map.add_waypoint(Point(-1, 3, 0)) # start corridor A
+        self.map.add_waypoint(Point(-1, 2, 0)) # start corridor A
         self.map.add_waypoint(Point(-1, -2, 0)) # start corridor B
         self.map.add_waypoint(Point(2, -3, 0)) # open room A
         self.map.add_waypoint(Point(2, 0, 0)) # open room B
@@ -125,35 +135,44 @@ class TurtleBot():
         self.robot_movement()
     
     def robot_movement(self):
-        while not rospy.is_shutdown():
+        while not rospy.is_shutdown() and self.frontier_exp:
             self.move_to_waypoint(Point(0,0,0))
-            while not all(x==True for x in self.found.values()):
-                self.rate.sleep()
-                if self.frontier_exploration():
-                    print "switching from frontier exploration to waypoint roaming"
-                    for wp in self.map.waypoints:
-
-                        if self.object_seen:
-                            self.beacon_to_object()
-
-                        self.move_to_waypoint(wp)
+            while not self.frontier_exploration():
                 if self.object_seen:
-                        self.beacon_to_object()
-            """ self.rate.sleep()
-            self.move_to_waypoint(Point(0,0,0)) """
+                    self.beacon_to_object()
+                if self.all_found():
+                    return
+                self.rate.sleep()
+
+            print "switching from frontier exploration to waypoint roaming"
+            self.frontier_exp = False
+
+        while not rospy.is_shutdown():
+            for wp in self.map.waypoints:
+                if self.all_found():
+                    print "done"
+                    return
+
+                if self.object_seen:
+                    self.beacon_to_object()
+
+                self.move_to_waypoint(wp)
+                
+    def all_found(self):
+        return all(x==True for x in self.found.values())
 
     def beacon_to_object(self):
         for key,value in self.found.iteritems():
             if self.found[key] == False and self.goal_estimates[key] != None:
                 print "moving to {} at {}".format(key, self.goal_estimates[key])
                 self.move_to_waypoint(self.goal_estimates[key])
-                if(self.map.euclidean_distance((self.odom_pose.pose.pose.position.x, self.odom_pose.pose.pose.position.y), (self.goal_estimates[key].x, self.goal_estimates[key].y)) <= 1):
+                distance = self.map.euclidean_distance((self.amcl_pose.pose.pose.position.x, self.amcl_pose.pose.pose.position.y), (self.goal_estimates[key].x, self.goal_estimates[key].y))
+                if(distance <= 1.5):
                     print "I have found {}!".format(key)
                     self.found[key] = True
                 else:
                     print "failed to reach {}".format(key)
         self.object_seen = False
-        #self.exploring = True
 
     def object_callback(self, msg):
         if msg.objects.data and not self.object_seen:
@@ -164,17 +183,28 @@ class TurtleBot():
                 if not self.found[key]:
                     try:
                         (trans, rot) = self.listner.lookupTransform("/map",object_frame_id, msg.header.stamp)
-                        self.goal_estimates[key] = Point(trans[0],trans[1],0)
+
+                        robot_x = self.amcl_pose.pose.pose.position.x
+                        robot_y = self.amcl_pose.pose.pose.position.y
+                        dist_between = self.map.euclidean_distance((robot_x,robot_y),(trans[0],trans[1]))
+                        dist_ratio = (dist_between - 1) / dist_between
+                        x = robot_x + dist_ratio * (trans[0] - robot_x)
+                        y = robot_y + dist_ratio * (trans[1] - robot_y)
+                        self.goal_estimates[key] = Point(x,y,0)
                         self.object_seen = True
+                        print "{} [x,y,z] [x,y,z,w] in \"{}\" frame: [{},{},{}] [{},{},{},{}]".format(
+						object_frame_id, "/map",
+						trans[0], trans[1], trans[2],
+						rot[0], rot[1], rot[2], rot[3])
+                        print "[x,y] robot position [{},{}]".format(robot_x, robot_y)
+                        print "distance to goal {}m".format(dist_between)
+                        print "[x,y] one meter away from goal: [{},{}]".format(x, y)
                     except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
                         continue
             if self.object_seen:
                 self.cancel_pub.publish(GoalID())
                 
-                """ print "{} [x,y,z] [x,y,z,w] in \"{}\" frame: [{},{},{}] [{},{},{},{}]".format(
-						object_frame_id, "/map",
-						trans[0], trans[1], trans[2],
-						rot[0], rot[1], rot[2], rot[3]) """
+                
 
     def move_to_waypoint(self, wp):
         """Sends commands to move the robot to a desired goal location.
@@ -184,7 +214,7 @@ class TurtleBot():
         returns:
             Boolean: True if destination is reached, False if 120 seconds pass without reaching the destination."""
 
-        
+        self.current_goal = (wp.x, wp.y)
 
         while(not self.ac.wait_for_server(rospy.Duration.from_sec(5.0))):
               rospy.loginfo("Waiting for the move_base action server to come up")
@@ -204,17 +234,21 @@ class TurtleBot():
         rospy.loginfo("Sending goal location ...")
         self.ac.send_goal(goal)
 
-        self.ac.wait_for_result(rospy.Duration(30))
-
-        if(self.ac.get_state() == GoalStatus.SUCCEEDED):
-            rospy.loginfo("You have reached the destination")
-            return True
-        else:
-            rospy.loginfo("The robot failed to reach the destination")
-            return False
+        self.ac.wait_for_result(rospy.Duration(60))
 
     def odom_callback(self, msg):
         self.odom_pose = msg
+
+    def amcl_callback(self, msg):
+        self.amcl_pose = msg
+        # print msg
+
+        x = msg.pose.pose.position.x
+        y = msg.pose.pose.position.y
+        distance = self.map.euclidean_distance((x, y),self.current_goal)
+
+        if distance < self.stopping_distance:
+            self.cancel_pub.publish(GoalID())
 
     def frontier_exploration(self):
         frontier = self.calculate_frontier()
@@ -270,7 +304,7 @@ class TurtleBot():
             if world_point == None:
                 print "World point out of map"
                 raise IndexError
-            d_cell = self.map.euclidean_distance((self.odom_pose.pose.pose.position.x, self.odom_pose.pose.pose.position.y), world_point)
+            d_cell = self.map.euclidean_distance((self.amcl_pose.pose.pose.position.x, self.amcl_pose.pose.pose.position.y), world_point)
             p_cell = a_cell / d_cell
             if p_cell >= max_prio:
                 prio_cell = cell
