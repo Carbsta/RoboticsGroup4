@@ -4,7 +4,7 @@
     <arg name="camera_info_topic" default="camera/rgb/camera_info"/>
     <arg name="resolution"    default="qhd" />
     <arg name="object_prefix" default="object"/>
-    <arg name="gui"           default="true"/>
+    <arg name="gui"           default="false"/>
     <arg name="settings_path" default="~/.ros/find_object_2d.ini"/>
 
 

@@ -8,13 +8,14 @@ import tf
 import cv_bridge, cv2
 import actionlib
 
-from geometry_msgs.msg import Point, Twist, PoseWithCovarianceStamped, TransformStamped
+from geometry_msgs.msg import Point, PoseWithCovarianceStamped, TransformStamped
 from nav_msgs.msg import Odometry, OccupancyGrid
 from find_object_2d.msg import ObjectsStamped
-from sensor_msgs.msg import LaserScan, Image
+from sensor_msgs.msg import Image, PointCloud2
 from actionlib_msgs.msg import *
 from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 from math import cos, sin, pi, isnan, sqrt
+from struct import unpack
 
 """
 TODO:
@@ -104,20 +105,27 @@ class TurtleBot():
         self.amcl_pose = PoseWithCovarianceStamped()
         self.stopping_distance = 0.2
         self.current_goal = (0,0)
+        self.points = PointCloud2()
 
         self.found = {"fire_hydrant":False, "green_box":False, "mail_box":False, "number_5":False}
         self.goal_estimates = {"fire_hydrant":None, "green_box":None, "mail_box":None, "number_5":None}
         self.objectIds = [None,"number_5","fire_hydrant","fire_hydrant","mail_box","mail_box","mail_box","fire_hydrant"]
         self.object_seen = False
 
+        self.ac = actionlib.SimpleActionClient("move_base",MoveBaseAction) # action client communicates with the move_base server
+        self.cancel_pub = rospy.Publisher('/move_base/cancel', GoalID, queue_size=1)
+
+        self.broadcaster = tf.TransformBroadcaster()
+        self.listner = tf.TransformListener()
+
         self.odom_sub = rospy.Subscriber('/odom',Odometry,self.odom_callback)
         self.amcl_sub = rospy.Subscriber('/amcl_pose', PoseWithCovarianceStamped, self.amcl_callback)
-        self.listner = tf.TransformListener()
-        self.cancel_pub = rospy.Publisher('/move_base/cancel', GoalID, queue_size=1)
         self.object_sub = rospy.Subscriber('/objectsStamped', ObjectsStamped, self.object_callback)
-        
+        self.image_sub = rospy.Subscriber('/camera/rgb/image_raw', Image, self.rgb_callback)
+        self.point_sub = rospy.Subscriber('/camera/depth/points', PointCloud2, callback=self.points_callback)
+
         self.bridge = cv_bridge.CvBridge()
-        self.ac = actionlib.SimpleActionClient("move_base",MoveBaseAction) # action client communicates with the move_base server
+    
 
     def initialise_waypoints(self):
         """creates waypoints for each room"""
@@ -192,19 +200,82 @@ class TurtleBot():
                         y = robot_y + dist_ratio * (trans[1] - robot_y)
                         self.goal_estimates[key] = Point(x,y,0)
                         self.object_seen = True
-                        print "{} [x,y,z] [x,y,z,w] in \"{}\" frame: [{},{},{}] [{},{},{},{}]".format(
+                        """ print "{} [x,y,z] [x,y,z,w] in \"{}\" frame: [{},{},{}] [{},{},{},{}]".format(
 						object_frame_id, "/map",
 						trans[0], trans[1], trans[2],
 						rot[0], rot[1], rot[2], rot[3])
                         print "[x,y] robot position [{},{}]".format(robot_x, robot_y)
                         print "distance to goal {}m".format(dist_between)
-                        print "[x,y] one meter away from goal: [{},{}]".format(x, y)
+                        print "[x,y] one meter away from goal: [{},{}]".format(x, y) """
                     except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
-                        continue
+                        self.object_seen = False
             if self.object_seen:
                 self.cancel_pub.publish(GoalID())
-                
-                
+
+    def points_callback(self, msg):
+        self.points = msg
+
+    def rgb_callback(self, msg):
+        image = self.bridge.imgmsg_to_cv2(msg,desired_encoding='bgr8')
+        hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+
+        lower_hsv_green = np.array([40, 200, 20], dtype="uint8")
+        upper_hsv_green = np.array([70, 255, 255], dtype="uint8")
+
+        green_mask = cv2.inRange(hsv_image, lower_hsv_green, upper_hsv_green)
+
+        if not self.object_seen and not self.found["green_box"]:
+            M = cv2.moments(green_mask)
+            if M['m00'] > 0:
+                u = int(M["m10"] / M["m00"])
+                v = int(M["m01"] / M["m00"])
+
+                arrayPosition = v*self.points.row_step + u*self.points.point_step
+                arrayPosX = arrayPosition + self.points.fields[0].offset
+                arrayPosY = arrayPosition + self.points.fields[1].offset
+                arrayPosZ = arrayPosition + self.points.fields[2].offset
+
+                [x] = unpack('f',self.points.data[arrayPosX:arrayPosX+4])
+                [y] = unpack('f',self.points.data[arrayPosY:arrayPosY+4])
+                [z] = unpack('f',self.points.data[arrayPosZ:arrayPosZ+4])
+
+                #print "[x,y,z] [{},{},{}]".format(x,y,z)
+                if not isnan(x):
+
+                    translation = (x, y, z)
+                    rotation = (0.0, 0.0, 0.0, 1.0)
+                    time = rospy.Time.now()
+                    child = "green_box"
+                    parent = self.points.header.frame_id
+
+                    self.broadcaster.sendTransform(translation, rotation, time, child, parent)
+                    
+
+                    try:
+                        (trans, rot) = self.listner.lookupTransform("/map",child,time)
+                        robot_x = self.amcl_pose.pose.pose.position.x
+                        robot_y = self.amcl_pose.pose.pose.position.y
+
+                        dist_between = self.map.euclidean_distance((robot_x,robot_y),(trans[0],trans[1]))
+                        dist_ratio = (dist_between - 1) / dist_between
+                        x = robot_x + dist_ratio * (trans[0] - robot_x)
+                        y = robot_y + dist_ratio * (trans[1] - robot_y)
+
+                        self.goal_estimates[child] = Point(x,y,0)
+                        self.object_seen = True
+
+                        """ print "{} [x,y,z] [x,y,z,w] in \"{}\" frame: [{},{},{}] [{},{},{},{}]".format(
+                        child, "/map",
+                        trans[0], trans[1], trans[2],
+                        rot[0], rot[1], rot[2], rot[3])
+                        print "[x,y] robot position [{},{}]".format(robot_x, robot_y)
+                        print "distance to goal {}m".format(dist_between)
+                        print "[x,y] one meter away from goal: [{},{}]".format(x, y) """
+
+                        self.cancel_pub.publish(GoalID())
+
+                    except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
+                        pass
 
     def move_to_waypoint(self, wp):
         """Sends commands to move the robot to a desired goal location.
