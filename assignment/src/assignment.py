@@ -107,7 +107,7 @@ class TurtleBot():
 
         self.found = {"fire_hydrant":False, "green_box":False, "mail_box":False, "number_5":False}
         self.goal_estimates = {"fire_hydrant":None, "green_box":None, "mail_box":None, "number_5":None}
-        self.objectIds = [None,"number_5","fire_hydrant","mail_box"]
+        self.objectIds = [None,"number_5","fire_hydrant","fire_hydrant","mail_box","mail_box","mail_box","fire_hydrant"]
         self.object_seen = False
 
         self.odom_sub = rospy.Subscriber('/odom',Odometry,self.odom_callback)
