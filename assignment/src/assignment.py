@@ -8,10 +8,10 @@ import tf
 import cv_bridge, cv2
 import actionlib
 
-from geometry_msgs.msg import Point, PoseWithCovarianceStamped, TransformStamped
+from geometry_msgs.msg import Point, PoseWithCovarianceStamped, TransformStamped, Twist
 from nav_msgs.msg import Odometry, OccupancyGrid
 from find_object_2d.msg import ObjectsStamped
-from sensor_msgs.msg import Image, PointCloud2
+from sensor_msgs.msg import Image, PointCloud2, LaserScan
 from actionlib_msgs.msg import *
 from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 from math import cos, sin, pi, isnan, sqrt
@@ -20,6 +20,7 @@ from struct import unpack
 """
 TODO:
 Mess with planner settings
+Check mailbox range finding.
 Refactor and documentation - --write object transform function--
 extra:
 rescaling slam map for fast frontier exploration
@@ -100,6 +101,7 @@ class TurtleBot():
         self.stopping_distance = 0.2
         self.current_goal = (0,0)
         self.points = PointCloud2()
+        self.ranges = [0] * 360
 
         self.found = {"fire_hydrant":False, "green_box":False, "mail_box":False, "number_5":False}
         self.goal_estimates = {"fire_hydrant":None, "green_box":None, "mail_box":None, "number_5":None}
@@ -108,6 +110,7 @@ class TurtleBot():
 
         self.ac = actionlib.SimpleActionClient("move_base",MoveBaseAction) # action client communicates with the move_base server
         self.cancel_pub = rospy.Publisher('/move_base/cancel', GoalID, queue_size=1)
+        self.twist_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
 
         self.broadcaster = tf.TransformBroadcaster()
         self.listner = tf.TransformListener()
@@ -117,6 +120,7 @@ class TurtleBot():
         self.object_sub = rospy.Subscriber('/objectsStamped', ObjectsStamped, self.object_callback)
         self.image_sub = rospy.Subscriber('/camera/rgb/image_raw', Image, self.rgb_callback)
         self.point_sub = rospy.Subscriber('/camera/depth/points', PointCloud2, callback=self.points_callback)
+        self.laser_sub = rospy.Subscriber('/scan', LaserScan,self.scan_callback)
 
         self.bridge = cv_bridge.CvBridge()
     
@@ -125,14 +129,13 @@ class TurtleBot():
         """creates waypoints for each room"""
         self.map.add_waypoint(Point(0, 0, 0)) # "centre"
         self.map.add_waypoint(Point(2, -3, 0)) # open room A
-        self.map.add_waypoint(Point(2, 0, 0)) # open room B
+        self.map.add_waypoint(Point(3, 0, 0)) # open room B
         self.map.add_waypoint(Point(2, 2, 0)) # closed room A
         self.map.add_waypoint(Point(4, 4, 0)) # closed room B
         self.map.add_waypoint(Point(6, 3, 0)) # far corridor A
         self.map.add_waypoint(Point(5,-3,0)) # far corridor B
         self.map.add_waypoint(Point(-1, 2, 0)) # start corridor A
         self.map.add_waypoint(Point(-1, -2, 0)) # start corridor B
-        pass
 
     def entry_function(self):
         self.robot_movement()
@@ -144,6 +147,9 @@ class TurtleBot():
             while points_visited < (2*num_points)-1:
                 for wp in self.map.waypoints:
                     self.move_to_waypoint(wp)
+
+                    if self.spin_safe() and not self.object_seen:
+                        self.spin()
 
                     if self.object_seen:
                         self.beacon_to_object()
@@ -165,6 +171,29 @@ class TurtleBot():
                 self.rate.sleep()
                 
             print "frontier exploration complete, {} out of {} objects found, switching to roaming".format(self.num_found(), len(self.found))
+
+    def spin_safe(self):
+        return not any(x <= 0.25 for x in self.ranges)
+
+    def spin(self):
+        print "spinning"
+        current_angle = 0
+        speed = 33 # degrees per second
+        angular_speed = speed*2*pi/360
+        angle = 360
+        relative_angle = angle*2*pi/360
+
+        t = Twist()
+        t.angular.z = angular_speed
+
+        t0 = rospy.Time.now().to_sec()
+        while current_angle < relative_angle and not self.object_seen:
+            self.twist_pub.publish(t)
+            t1 = rospy.Time.now().to_sec()
+            current_angle = angular_speed*(t1 - t0)
+
+        t.angular.z = 0
+        self.twist_pub.publish(t)
 
     def num_found(self):
         return sum(x==True for x in self.found.values())
@@ -318,6 +347,9 @@ class TurtleBot():
 
         if distance < self.stopping_distance:
             self.cancel_pub.publish(GoalID())
+
+    def scan_callback(self, msg):
+        self.ranges = msg.ranges
 
     def frontier_exploration(self):
         frontier = self.calculate_frontier()
