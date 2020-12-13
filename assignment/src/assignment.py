@@ -20,15 +20,15 @@ from struct import unpack
 """
 TODO:
 
-Variable to control time before navigation goals fail
 New approaches for handling getting stuck during frontier exploration
-- decide on condition to fall back to waypoint navigation
-Green object - use image slicing as before, but get the object's 2d height, width, shear etc
-and transform to map space with tf.
+-- decide on condition to fall back to frontier exploration --
+--Green object - using point cloud data.--
 Mess with planner settings
 --Re-add goal cancelling--
-Change arrival at goal object success condition, robot <= 1m from goal.
-Refactor and documentation
+--Change arrival at goal object success condition, robot <= 1m from goal.--
+Refactor and documentation - write object transform function
+Use green box technique for fire hydrant
+tweak with mail box images to avoid moving behind it.
 """
 
 class Map:
