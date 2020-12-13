@@ -1,12 +1,25 @@
 <launch>
   <!-- Arguments -->
   <arg name="model" default="$(env TURTLEBOT3_MODEL)" doc="model type [burger, waffle, waffle_pi]"/>
-  <arg name="map_file" default="$(find assignment)/maps/train_env.yaml"/>
   <arg name="open_rviz" default="true"/>
   <arg name="move_forward_only" default="false"/>
 
+  <arg name="followbot_launch" default="$(find followbot)/launch/turtlebot3_training.launch" />
+  <arg name="map_file" default="$(find assignment)/maps/train_env.yaml"/>
+
+  <arg name="rgb_topic"         default="camera/rgb/image_raw"/>
+  <arg name="depth_topic"       default="camera/depth/image_raw"/>
+  <arg name="camera_info_topic" default="camera/rgb/camera_info"/>
+  <arg name="resolution"    default="qhd" />
+  <arg name="object_prefix" default="object"/>
+  <arg name="find_object_gui" default="false"/>
+  <arg name="settings_path" default="~/.ros/find_object_2d.ini"/>
+
+  <arg name="initial_pose_x" default="-1"/>
+  <arg name="initial_pose_y" default = "4.2"/>
+
   <!-- followbot -->
-  <include file="$(find followbot)/launch/turtlebot3_training.launch">
+  <include file="$(arg followbot_launch)">
     <arg name="model" value="$(arg model)"/>
   </include>
 
@@ -15,9 +28,23 @@
     <arg name="model" value="$(arg model)" />
     <arg name="open_rviz" value="$(arg open_rviz)"/>
     <arg name="move_forward_only" value="$(arg move_forward_only)" />
+    <arg name="map_file" value="$(arg map_file)" />
+    <arg name="initial_pose_x" value="$(arg initial_pose_x)" />
+    <arg name="initial_pose_y" value="$(arg initial_pose_y)" />
  </include>
 
  <!-- Find Object -->
- <include file="$(find assignment)/launch/find-object.launch" />
+ <node name="find_object_3d" pkg="find_object_2d" type="find_object_2d" output="screen">
+		<param name="gui" value="$(arg find_object_gui)" type="bool"/>
+		<param name="settings_path" value="$(arg settings_path)" type="str"/>
+		<param name="subscribe_depth" value="true" type="bool"/>
+		<param name="objects_path" value="$(find assignment)/objects" type="str"/>
+		<param name="object_prefix" value="$(arg object_prefix)" type="str"/>
+		<param name="approx_sync" value="false" type="bool"/>
+				
+		<remap from="rgb/image_rect_color" to="$(arg rgb_topic)"/>
+		<remap from="depth_registered/image_raw" to="$(arg depth_topic)"/>
+		<remap from="depth_registered/camera_info" to="$(arg camera_info_topic)"/>
+	</node>
 	
 </launch>
