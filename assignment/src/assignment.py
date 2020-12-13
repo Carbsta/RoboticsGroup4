@@ -277,7 +277,7 @@ class TurtleBot():
 
     def find_object_by_mask(self, object_name, mask):
 
-        if not self.object_seen and not self.found[object_name]:
+        if not self.found[object_name]:
             M = cv2.moments(mask)
             if M['m00'] > 0:
                 u = int(M["m10"] / M["m00"])
@@ -361,14 +361,11 @@ class TurtleBot():
         if world_point == None:
             print "World point out of map"
             raise IndexError
-        print "fronteir goal {} {}".format(world_point[0], world_point[1])
+        print "frontier goal {} {}".format(world_point[0], world_point[1])
         goal = Point(world_point[0], world_point[1], 0)
         self.move_to_waypoint(goal)
         if(self.ac.get_state() != GoalStatus.SUCCEEDED):
             self.map.bad_points.append(prio_cell)
-        else:
-            if len(self.map.bad_points) > 10:
-                self.map.bad_points = []
         return False
 
     def calculate_frontier(self):

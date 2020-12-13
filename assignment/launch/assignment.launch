@@ -1,14 +1,9 @@
 <launch>
   <!-- Arguments -->
   <arg name="model" default="$(env TURTLEBOT3_MODEL)" doc="model type [burger, waffle, waffle_pi]"/>
-  <arg name="slam_methods" default="gmapping" doc="slam type [gmapping, cartographer, hector, karto, frontier_exploration]"/>
-  <!-- <arg name="map_file" default="$(find assignment)/maps/train_env.yaml"/>>-->
-  <arg name="configuration_basename" default="turtlebot3_lds_2d.lua"/>
+  <arg name="map_file" default="$(find assignment)/maps/train_env.yaml"/>
   <arg name="open_rviz" default="true"/>
   <arg name="move_forward_only" default="false"/>
-  <arg name="rgb_topic"         default="camera/rgb/image_raw"/>
-  <arg name="depth_topic"       default="camera/depth/image_raw"/>
-  <arg name="camera_info_topic" default="camera/rgb/camera_info"/>
 
   <!-- followbot -->
   <include file="$(find followbot)/launch/turtlebot3_training.launch">
