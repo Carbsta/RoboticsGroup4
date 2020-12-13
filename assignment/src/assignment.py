@@ -109,7 +109,7 @@ class TurtleBot():
 
         self.found = {"fire_hydrant":False, "green_box":False, "mail_box":False, "number_5":False}
         self.goal_estimates = {"fire_hydrant":None, "green_box":None, "mail_box":None, "number_5":None}
-        self.objectIds = [None,"number_5","fire_hydrant","fire_hydrant","mail_box","mail_box","mail_box","fire_hydrant"]
+        self.objectIds = [None,"number_5","mail_box","mail_box","mail_box"]
         self.object_seen = False
 
         self.ac = actionlib.SimpleActionClient("move_base",MoveBaseAction) # action client communicates with the move_base server
@@ -215,22 +215,38 @@ class TurtleBot():
             print "[x,y] {}m away from goal: [{},{}]".format(dist_from, x, y) """
 
         except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
-            self.object_seen = False
+            pass
 
     def points_callback(self, msg):
         self.points = msg
 
     def rgb_callback(self, msg):
-        image = self.bridge.imgmsg_to_cv2(msg,desired_encoding='bgr8')
-        hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        if not self.object_seen:
+            image = self.bridge.imgmsg_to_cv2(msg,desired_encoding='bgr8')
+            hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
-        lower_hsv_green = np.array([40, 200, 20], dtype="uint8")
-        upper_hsv_green = np.array([70, 255, 255], dtype="uint8")
+            # colour slicing for the green box
+            lower_hsv_green = np.array([40, 200, 20], dtype="uint8")
+            upper_hsv_green = np.array([70, 255, 255], dtype="uint8")
+            green_mask = cv2.inRange(hsv_image, lower_hsv_green, upper_hsv_green)
 
-        green_mask = cv2.inRange(hsv_image, lower_hsv_green, upper_hsv_green)
+            # colour slicing for the fire hydrant
+            lower_hsv_red = np.array([0,255, 35], dtype="uint8")
+            upper_hsv_red = np.array([10,255,64], dtype="uint8")
+            red_mask = cv2.inRange(hsv_image, lower_hsv_red, upper_hsv_red)
 
-        if not self.object_seen and not self.found["green_box"]:
-            M = cv2.moments(green_mask)
+            if not self.found["green_box"]:
+                self.find_object_by_mask("green_box", green_mask)
+            if not self.found["fire_hydrant"]:
+                self.find_object_by_mask("fire_hydrant", red_mask)
+            
+            if self.object_seen:
+                self.cancel_pub.publish(GoalID())
+
+    def find_object_by_mask(self, object_name, mask):
+
+        if not self.object_seen and not self.found[object_name]:
+            M = cv2.moments(mask)
             if M['m00'] > 0:
                 u = int(M["m10"] / M["m00"])
                 v = int(M["m01"] / M["m00"])
@@ -244,21 +260,17 @@ class TurtleBot():
                 [y] = unpack('f',self.points.data[arrayPosY:arrayPosY+4])
                 [z] = unpack('f',self.points.data[arrayPosZ:arrayPosZ+4])
 
-                #print "[x,y,z] [{},{},{}]".format(x,y,z)
                 if not isnan(x):
 
                     translation = (x, y, z)
                     rotation = (0.0, 0.0, 0.0, 1.0)
                     time = rospy.Time.now()
-                    child = "green_box"
+                    child = object_name
                     parent = self.points.header.frame_id
 
                     self.broadcaster.sendTransform(translation, rotation, time, child, parent)
                     
                     self.range_object("/map", child, time, 0.75, child)
-
-                    if self.object_seen:
-                        self.cancel_pub.publish(GoalID())
 
     def move_to_waypoint(self, wp):
         """Sends commands to move the robot to a desired goal location.
