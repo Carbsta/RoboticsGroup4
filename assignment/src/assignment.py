@@ -19,16 +19,10 @@ from struct import unpack
 
 """
 TODO:
-
-New approaches for handling getting stuck during frontier exploration
--- decide on condition to fall back to frontier exploration --
---Green object - using point cloud data.--
 Mess with planner settings
---Re-add goal cancelling--
---Change arrival at goal object success condition, robot <= 1m from goal.--
 Refactor and documentation - --write object transform function--
-Use green box technique for fire hydrant
-tweak with mail box images to avoid moving behind it.
+extra:
+rescaling slam map for fast frontier exploration
 """
 
 class Map:
