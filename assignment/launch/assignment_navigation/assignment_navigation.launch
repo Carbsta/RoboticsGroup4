@@ -18,16 +18,17 @@
   <node pkg="map_server" name="map_server" type="map_server" args="$(arg map_file)"/>
 
   <!-- AMCL -->
-  <include file="$(find turtlebot3_navigation)/launch/amcl.launch">
+  <include file="$(find assignment)/launch/assignment_navigation/amcl.launch">
     <arg name="initial_pose_x" value="$(arg initial_pose_x)"/>
     <arg name="initial_pose_y" value="$(arg initial_pose_y)"/>
   </include>
 
-  <node pkg="gmapping" type="slam_gmapping" name="turtlebot3_slam_gmapping" output="screen">
+  <!-- Mapping -->
+  <node pkg="gmapping" type="slam_gmapping" name="assignment_mapping" output="screen">
     <param name="base_frame" value="base_footprint"/>
     <param name="odom_frame" value="odom"/>
     <param name="map_frame"  value="map"/>
-    <rosparam command="load" file="$(find turtlebot3_slam)/config/gmapping_params.yaml" />
+    <rosparam command="load" file="$(find assignment)/param/gmapping_params.yaml" />
     <remap from="/map" to="/slam_map"/>
     <remap from="/map_metadata" to="/slam_map_metadata"/>
   </node>

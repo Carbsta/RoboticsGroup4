@@ -27,13 +27,12 @@ rescaling slam map for fast frontier exploration
 """
 
 class Map:
+    """Map class containing OccupancyGrid for frontier exploration and waypoints for waypoint navigation"""
     def __init__(self):
         self.waypoints = []
         self.grid = OccupancyGrid()
-        self.robot_pos = 0
         self.occupied_thresh = 0.65
         self.free_thresh = 0.196
-        #self.bounds = bounds
         self.bad_points = []
         self.map_sub = rospy.Subscriber('/slam_map', OccupancyGrid, self.map_callback)
 
@@ -41,6 +40,7 @@ class Map:
         self.grid = msg
 
     def euclidean_distance(self, x, y):
+        """finds the euclidean distance between any two points in n dimensions"""
         return sqrt(sum([(a - b) ** 2 for a, b in zip(x, y)]))                    
     
     def add_waypoint(self, point):
@@ -67,14 +67,6 @@ class Map:
         else:
             return wp
 
-    """ def in_inner_bounds(self, point):
-        in_x = (point[0] > self.bounds[0][0] and point[0] > self.bounds[1][0] 
-            and point[0] < self.bounds[2][0] and point[0] < self.bounds[3][0])
-        in_y = (point[1] > self.bounds[0][1] and point[0] < self.bounds[1][1] 
-            and point[1] > self.bounds[2][1] and point[0] < self.bounds[3][1])
-        return in_x and in_y """
-
-
     def to_index(self, gx, gy):
         return gy * self.grid.info.width + gx
 
@@ -83,20 +75,13 @@ class Map:
         x = index - (y * self.grid.info.width)
         return (x,y)
 
-""" class Pose():
-    def __init__(self, position, orientation):
-        self.position = position
-        self.orientation = orientation """
-
 class TurtleBot():
     def __init__(self):
         rospy.init_node('turtlebot', anonymous=True)
         self.rate = rospy.Rate(10)
-        #bounds = [(-1.38, 4.46), (-1.43, -4.17), (6.50,4.26), (6.27, -4.27)]
         self.frontier_exp = False
         self.map = Map()
         self.initialise_waypoints()
-        self.odom_pose = Odometry()
         self.amcl_pose = PoseWithCovarianceStamped()
         self.stopping_distance = 0.2
         self.current_goal = (0,0)
@@ -115,7 +100,6 @@ class TurtleBot():
         self.broadcaster = tf.TransformBroadcaster()
         self.listner = tf.TransformListener()
 
-        self.odom_sub = rospy.Subscriber('/odom',Odometry,self.odom_callback)
         self.amcl_sub = rospy.Subscriber('/amcl_pose', PoseWithCovarianceStamped, self.amcl_callback)
         self.object_sub = rospy.Subscriber('/objectsStamped', ObjectsStamped, self.object_callback)
         self.image_sub = rospy.Subscriber('/camera/rgb/image_raw', Image, self.rgb_callback)
@@ -238,14 +222,6 @@ class TurtleBot():
             self.goal_estimates[object_key] = Point(x,y,0)
             self.object_seen = True
 
-            """ print "{} [x,y,z] [x,y,z,w] in \"{}\" frame: [{},{},{}] [{},{},{},{}]".format(
-            object_frame, map_frame,
-            trans[0], trans[1], trans[2],
-            rot[0], rot[1], rot[2], rot[3])
-            print "[x,y] robot position [{},{}]".format(robot_x, robot_y)
-            print "distance to goal {}m".format(dist_between)
-            print "[x,y] {}m away from goal: [{},{}]".format(dist_from, x, y) """
-
         except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
             pass
 
@@ -327,19 +303,14 @@ class TurtleBot():
         goal.target_pose.pose.orientation.y = 0.0
         goal.target_pose.pose.orientation.z = 0.0
         goal.target_pose.pose.orientation.w = 1.0
-        """ goal.target_pose.pose.orientation.w = self.odom_pose.pose.pose.orientation.w """
 
         rospy.loginfo("Sending goal location ...")
         self.ac.send_goal(goal)
 
         self.ac.wait_for_result(rospy.Duration(60))
 
-    def odom_callback(self, msg):
-        self.odom_pose = msg
-
     def amcl_callback(self, msg):
         self.amcl_pose = msg
-        # print msg
 
         x = msg.pose.pose.position.x
         y = msg.pose.pose.position.y
@@ -353,7 +324,6 @@ class TurtleBot():
 
     def frontier_exploration(self):
         frontier = self.calculate_frontier()
-        # print "frontier: \n{}".format(frontier)
         if not frontier:
             return True
         prio_cell = self.highest_priority(frontier)
@@ -371,8 +341,6 @@ class TurtleBot():
     def calculate_frontier(self):
         frontier = []
         for x in range(self.map.grid.info.width * self.map.grid.info.height):
-            # world_point = self.map.to_world(self.map.from_index(x))
-            # if self.map.in_inner_bounds(world_point):
             if not x in self.map.bad_points:
                 if self.map.grid.data[x] != -1 and self.map.grid.data[x] < 65:
                     borders = self.get_borders(x)
