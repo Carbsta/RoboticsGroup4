@@ -123,43 +123,52 @@ class TurtleBot():
 
     def initialise_waypoints(self):
         """creates waypoints for each room"""
-        self.map.add_waypoint(Point(-1, 2, 0)) # start corridor A
-        self.map.add_waypoint(Point(-1, -2, 0)) # start corridor B
+        self.map.add_waypoint(Point(0, 0, 0)) # "centre"
         self.map.add_waypoint(Point(2, -3, 0)) # open room A
         self.map.add_waypoint(Point(2, 0, 0)) # open room B
         self.map.add_waypoint(Point(2, 2, 0)) # closed room A
         self.map.add_waypoint(Point(4, 4, 0)) # closed room B
         self.map.add_waypoint(Point(6, 3, 0)) # far corridor A
         self.map.add_waypoint(Point(5,-3,0)) # far corridor B
+        self.map.add_waypoint(Point(-1, 2, 0)) # start corridor A
+        self.map.add_waypoint(Point(-1, -2, 0)) # start corridor B
         pass
 
     def entry_function(self):
         self.robot_movement()
     
     def robot_movement(self):
-        while not rospy.is_shutdown() and self.frontier_exp:
-            self.move_to_waypoint(Point(0,0,0))
+        while not rospy.is_shutdown():
+            num_points = len(self.map.waypoints)
+            points_visited = 0
+            while points_visited < (2*num_points)-1:
+                for wp in self.map.waypoints:
+                    self.move_to_waypoint(wp)
+
+                    if self.object_seen:
+                        self.beacon_to_object()
+
+                    if self.all_found():
+                        print "done!"
+                        return
+
+                    points_visited += 1
+
+            print "{} out of {} objects found in two tours, switching to frontier exploration".format(self.num_found(), len(self.found))
+            
             while not self.frontier_exploration():
                 if self.object_seen:
                     self.beacon_to_object()
                 if self.all_found():
+                    print "done!"
                     return
                 self.rate.sleep()
-
-            print "switching from frontier exploration to waypoint roaming"
-            self.frontier_exp = False
-
-        while not rospy.is_shutdown():
-            for wp in self.map.waypoints:
-                if self.all_found():
-                    print "done"
-                    return
-
-                if self.object_seen:
-                    self.beacon_to_object()
-
-                self.move_to_waypoint(wp)
                 
+            print "frontier exploration complete, {} out of {} objects found, switching to roaming".format(self.num_found(), len(self.found))
+
+    def num_found(self):
+        return sum(x==True for x in self.found.values())
+
     def all_found(self):
         return all(x==True for x in self.found.values())
 
