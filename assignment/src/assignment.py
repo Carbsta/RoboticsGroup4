@@ -26,7 +26,7 @@ New approaches for handling getting stuck during frontier exploration
 Mess with planner settings
 --Re-add goal cancelling--
 --Change arrival at goal object success condition, robot <= 1m from goal.--
-Refactor and documentation - write object transform function
+Refactor and documentation - --write object transform function--
 Use green box technique for fire hydrant
 tweak with mail box images to avoid moving behind it.
 """
@@ -189,28 +189,33 @@ class TurtleBot():
                 object_frame_id = "object_" + str(int(object_id))
                 key = self.objectIds[int(object_id)]
                 if not self.found[key]:
-                    try:
-                        (trans, rot) = self.listner.lookupTransform("/map",object_frame_id, msg.header.stamp)
-
-                        robot_x = self.amcl_pose.pose.pose.position.x
-                        robot_y = self.amcl_pose.pose.pose.position.y
-                        dist_between = self.map.euclidean_distance((robot_x,robot_y),(trans[0],trans[1]))
-                        dist_ratio = (dist_between - 1) / dist_between
-                        x = robot_x + dist_ratio * (trans[0] - robot_x)
-                        y = robot_y + dist_ratio * (trans[1] - robot_y)
-                        self.goal_estimates[key] = Point(x,y,0)
-                        self.object_seen = True
-                        """ print "{} [x,y,z] [x,y,z,w] in \"{}\" frame: [{},{},{}] [{},{},{},{}]".format(
-						object_frame_id, "/map",
-						trans[0], trans[1], trans[2],
-						rot[0], rot[1], rot[2], rot[3])
-                        print "[x,y] robot position [{},{}]".format(robot_x, robot_y)
-                        print "distance to goal {}m".format(dist_between)
-                        print "[x,y] one meter away from goal: [{},{}]".format(x, y) """
-                    except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
-                        self.object_seen = False
+                    self.range_object("/map", object_frame_id, msg.header.stamp, 0.75, key)
             if self.object_seen:
                 self.cancel_pub.publish(GoalID())
+
+    def range_object(self, map_frame, object_frame, time, dist_from, object_key):
+        try:
+            (trans, rot) = self.listner.lookupTransform("/map", object_frame, time)
+
+            robot_x = self.amcl_pose.pose.pose.position.x
+            robot_y = self.amcl_pose.pose.pose.position.y
+            dist_between = self.map.euclidean_distance((robot_x,robot_y),(trans[0],trans[1]))
+            dist_ratio = (dist_between - dist_from) / dist_between
+            x = robot_x + dist_ratio * (trans[0] - robot_x)
+            y = robot_y + dist_ratio * (trans[1] - robot_y)
+            self.goal_estimates[object_key] = Point(x,y,0)
+            self.object_seen = True
+
+            """ print "{} [x,y,z] [x,y,z,w] in \"{}\" frame: [{},{},{}] [{},{},{},{}]".format(
+            object_frame, map_frame,
+            trans[0], trans[1], trans[2],
+            rot[0], rot[1], rot[2], rot[3])
+            print "[x,y] robot position [{},{}]".format(robot_x, robot_y)
+            print "distance to goal {}m".format(dist_between)
+            print "[x,y] {}m away from goal: [{},{}]".format(dist_from, x, y) """
+
+        except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
+            self.object_seen = False
 
     def points_callback(self, msg):
         self.points = msg
@@ -250,32 +255,10 @@ class TurtleBot():
 
                     self.broadcaster.sendTransform(translation, rotation, time, child, parent)
                     
+                    self.range_object("/map", child, time, 0.75, child)
 
-                    try:
-                        (trans, rot) = self.listner.lookupTransform("/map",child,time)
-                        robot_x = self.amcl_pose.pose.pose.position.x
-                        robot_y = self.amcl_pose.pose.pose.position.y
-
-                        dist_between = self.map.euclidean_distance((robot_x,robot_y),(trans[0],trans[1]))
-                        dist_ratio = (dist_between - 1) / dist_between
-                        x = robot_x + dist_ratio * (trans[0] - robot_x)
-                        y = robot_y + dist_ratio * (trans[1] - robot_y)
-
-                        self.goal_estimates[child] = Point(x,y,0)
-                        self.object_seen = True
-
-                        """ print "{} [x,y,z] [x,y,z,w] in \"{}\" frame: [{},{},{}] [{},{},{},{}]".format(
-                        child, "/map",
-                        trans[0], trans[1], trans[2],
-                        rot[0], rot[1], rot[2], rot[3])
-                        print "[x,y] robot position [{},{}]".format(robot_x, robot_y)
-                        print "distance to goal {}m".format(dist_between)
-                        print "[x,y] one meter away from goal: [{},{}]".format(x, y) """
-
+                    if self.object_seen:
                         self.cancel_pub.publish(GoalID())
-
-                    except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
-                        pass
 
     def move_to_waypoint(self, wp):
         """Sends commands to move the robot to a desired goal location.
