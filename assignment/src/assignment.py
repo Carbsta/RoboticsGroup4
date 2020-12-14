@@ -96,7 +96,7 @@ class TurtleBot():
         """Information about the objects, inlcuding whether they have been found yet, where
         the robot thinks a waypoint to move near them should be located, a list to convert from
         IDs from find_object_2d to the names used by the robot, and a dictionary to record the image
-        coordinates of the objects found using find_object_2d""""
+        coordinates of the objects found using find_object_2d"""
         self.found = {"fire_hydrant":False, "green_box":False, "mail_box":False, "number_5":False}
         self.goal_estimates = {"fire_hydrant":None, "green_box":None, "mail_box":None, "number_5":None}
         self.objectIds = [None,"number_5","mail_box","mail_box","mail_box"]
