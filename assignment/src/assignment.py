@@ -33,7 +33,7 @@ class Map:
         self.grid = OccupancyGrid()
         self.occupied_thresh = 0.65
         self.free_thresh = 0.196
-        self.bad_points = []
+        self.attempted_points = []
         self.map_sub = rospy.Subscriber('/slam_map', OccupancyGrid, self.map_callback)
 
     def map_callback(self, msg):
@@ -125,10 +125,25 @@ class TurtleBot():
         self.robot_movement()
     
     def robot_movement(self):
+        num_points = len(self.map.waypoints)
+        tours = 0
         while not rospy.is_shutdown():
-            num_points = len(self.map.waypoints)
+
+            if self.frontier_exp:
+                self.move_to_waypoint(Point(0,0,0))
+            while self.frontier_exp and not self.frontier_exploration():
+                if self.object_seen:
+                    self.beacon_to_object()
+                if self.all_found():
+                    print "done!"
+                    return
+                self.rate.sleep()
+            if self.frontier_exp:
+                print "frontier exploration complete, {} out of {} objects found, switching to roaming".format(self.num_found(), len(self.found))
+                self.frontier_exp = False
+
             points_visited = 0
-            while points_visited < (2*num_points)-1:
+            while points_visited < num_points-1:
                 for wp in self.map.waypoints:
                     self.move_to_waypoint(wp)
 
@@ -143,18 +158,9 @@ class TurtleBot():
                         return
 
                     points_visited += 1
-
-            print "{} out of {} objects found in two tours, switching to frontier exploration".format(self.num_found(), len(self.found))
+            tours += 1
+            print "{} out of {} objects found in {} tour(s)".format(self.num_found(), len(self.found), tours)
             
-            while not self.frontier_exploration():
-                if self.object_seen:
-                    self.beacon_to_object()
-                if self.all_found():
-                    print "done!"
-                    return
-                self.rate.sleep()
-                
-            print "frontier exploration complete, {} out of {} objects found, switching to roaming".format(self.num_found(), len(self.found))
 
     def spin_safe(self):
         return not any(x <= 0.25 for x in self.ranges)
@@ -280,7 +286,7 @@ class TurtleBot():
                     
                     self.range_object("/map", child, time, 0.75, child)
 
-    def move_to_waypoint(self, wp):
+    def move_to_waypoint(self, wp, frontier=False):
         """Sends commands to move the robot to a desired goal location.
         
         arguments:
@@ -307,7 +313,11 @@ class TurtleBot():
         rospy.loginfo("Sending goal location ...")
         self.ac.send_goal(goal)
 
-        self.ac.wait_for_result(rospy.Duration(60))
+        distance = self.map.euclidean_distance((self.amcl_pose.pose.pose.position.x, self.amcl_pose.pose.pose.position.y),(wp.x, wp.y))
+        speed = 0.1
+
+        timeout = (distance / speed) if frontier else 60
+        self.ac.wait_for_result(rospy.Duration(timeout))
 
     def amcl_callback(self, msg):
         self.amcl_pose = msg
@@ -333,15 +343,14 @@ class TurtleBot():
             raise IndexError
         print "frontier goal {} {}".format(world_point[0], world_point[1])
         goal = Point(world_point[0], world_point[1], 0)
-        self.move_to_waypoint(goal)
-        if(self.ac.get_state() != GoalStatus.SUCCEEDED):
-            self.map.bad_points.append(prio_cell)
+        self.move_to_waypoint(goal, True)
+        self.map.attempted_points.append(prio_cell)
         return False
 
     def calculate_frontier(self):
         frontier = []
         for x in range(self.map.grid.info.width * self.map.grid.info.height):
-            if not x in self.map.bad_points:
+            if not x in self.map.attempted_points:
                 if self.map.grid.data[x] != -1 and self.map.grid.data[x] < 65:
                     borders = self.get_borders(x)
                     if -1 in borders:
@@ -381,6 +390,7 @@ if __name__ == '__main__':
     try:
         print('testing')
         robot = TurtleBot()
+        robot.frontier_exp = False
         robot.entry_function()
     except rospy.ROSInterruptException:
         pass
