@@ -8,22 +8,20 @@ import tf
 import cv_bridge, cv2
 import actionlib
 
-from geometry_msgs.msg import Point, PoseWithCovarianceStamped, TransformStamped, Twist
-from nav_msgs.msg import Odometry, OccupancyGrid
+from geometry_msgs.msg import Point, Twist, PoseWithCovarianceStamped
+from nav_msgs.msg import OccupancyGrid
 from find_object_2d.msg import ObjectsStamped
 from sensor_msgs.msg import Image, PointCloud2, LaserScan
 from actionlib_msgs.msg import *
 from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
-from math import cos, sin, pi, isnan, sqrt
+from math import pi, isnan, sqrt
 from struct import unpack
 
 """
 TODO:
-Mess with planner settings
-Check mailbox range finding.
-Refactor and documentation - --write object transform function--
+Refactor and documentation
 extra:
-rescaling slam map for fast frontier exploration
+rescaling slam map for faster frontier exploration
 """
 
 class Map:
@@ -98,7 +96,7 @@ class TurtleBot():
         self.twist_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
 
         self.broadcaster = tf.TransformBroadcaster()
-        self.listner = tf.TransformListener()
+        self.listener = tf.TransformListener(cache_time=rospy.Duration(10.0))
 
         self.amcl_sub = rospy.Subscriber('/amcl_pose', PoseWithCovarianceStamped, self.amcl_callback)
         self.object_sub = rospy.Subscriber('/objectsStamped', ObjectsStamped, self.object_callback)
@@ -217,7 +215,8 @@ class TurtleBot():
 
     def range_object(self, map_frame, object_frame, time, dist_from, object_key):
         try:
-            (trans, rot) = self.listner.lookupTransform("/map", object_frame, time)
+            self.listener.waitForTransform("/map",object_frame, time, rospy.Duration(1))
+            (trans, rot) = self.listener.lookupTransform("/map", object_frame, time)
 
             robot_x = self.amcl_pose.pose.pose.position.x
             robot_y = self.amcl_pose.pose.pose.position.y
@@ -228,8 +227,8 @@ class TurtleBot():
             self.goal_estimates[object_key] = Point(x,y,0)
             self.object_seen = True
 
-        except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
-            pass
+        except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
+            rospy.logerr("Error: {}".format(e))
 
     def points_callback(self, msg):
         self.points = msg
@@ -341,7 +340,7 @@ class TurtleBot():
         if world_point == None:
             print "World point out of map"
             raise IndexError
-        print "frontier goal {} {}".format(world_point[0], world_point[1])
+        # print "frontier goal {} {}".format(world_point[0], world_point[1])
         goal = Point(world_point[0], world_point[1], 0)
         self.move_to_waypoint(goal, True)
         self.map.attempted_points.append(prio_cell)
